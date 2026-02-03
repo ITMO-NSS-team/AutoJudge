@@ -50,49 +50,192 @@ JSON_OBJECT_OUTPUT_FORMAT = """
 - Just: {"AgentName": [...], ...}
 """
 
+
+# default MAS prompts
 DEFAULT_POOL_INSTRUCT = Template(
     Template("""
 You are an AI judge pool generator specialized in creating teams of LLM judges for evaluating agentic systems.
 
 DESIGN PRINCIPLES:
-- START SIMPLE: Create 4-5 judges for comprehensive evaluation
-- Cover key aspects: correctness, tools, reasoning, efficiency
-- Each judge evaluates ONE specific criterion
-
-**CRITICAL OUTPUT FORMAT FOR JUDGES** (copy exactly into each judge instruction):
-Return EXACTLY in format "SCORE | EXPLANATION":
-8.5 | Agent correctly solved task with minor formatting issues
-
-text
-NO newlines! Single line with " | " separator! NO JSON!
+- START SIMPLE: Create the minimum number of judges needed
+- Prefer 3-5 judges for comprehensive agent evaluation
+- Add more judges only when:
+  * Independent evaluation criteria can be assessed in parallel
+  * Different metric domains are needed (correctness, efficiency, safety, creativity)
+- Avoid over-engineering: one comprehensive judge > multiple narrow similar judges
 
 RESPONSE FORMAT:
 ${json_array_response_format}
 
-RULES:
-- Judge names MUST end with _JUDGE
-- "mcp_tools": [] for ALL judges
-- Copy **CRITICAL OUTPUT FORMAT** verbatim into each judge's instructions
-
 EXAMPLES:
 
+Simple evaluation (1 judge):
 [
   {
     "name": "TASK_CORRECTNESS_JUDGE",
-    "instructions": "**TASK**: Evaluate final answer correctness.\n**Return EXACTLY**: `8.5 | Agent correctly solved task with minor formatting issues`",
-    "mcp_tools": []
-  },
-  {
-    "name": "TOOL_SELECTION_JUDGE", 
-    "instructions": "**TASK**: Evaluate tool selection appropriateness.\n**Return EXACTLY**: `7.0 | Correct tools selected for task`",
-    "mcp_tools": []
-  },
-  {
-    "name": "REASONING_QUALITY_JUDGE",
-    "instructions": "**TASK**: Evaluate reasoning quality.\n**Return EXACTLY**: `9.0 | Clear logical steps with evidence`",
+    "instructions": "**Instruction**:\n\nYou are tasked with evaluating whether the agent's final response accurately solves the user's task. Focus on:\n- Exact match to expected output format (GAIA: short, no units/explanations)\n- Factual correctness against ground truth\n- Completeness (all required elements present)\n\n**Scoring**:\n- \"ideal\" if perfectly correct and formatted\n- \"fair\" if minor format/content issues\n- \"poor\" if fundamentally wrong or incomplete\n\nReturn JSON: {\"response_id\": \"...\", \"justification\": \"...\", \"score\": \"ideal|fair|poor\"}",
     "mcp_tools": []
   }
 ]
+
+Complex evaluation (4 judges):
+[
+  {
+    "name": "TOOL_SELECTION_JUDGE",
+    "instructions": "**Instruction**:
+You are an evaluation assistant assessing whether a tool call correctly matches a user's question. Your task is to evaluate whether the tool selected is the appropriate choice to answer the question, using only the list of available tools provided. Focus strictly on selection relevance; ignore parameter details or execution outcomes.
+
+**Evaluation Criteria**:
+1. *Tool Relevance* - Is the selected tool clearly relevant? Must directly address core intent.
+2. *Best Fit Selection* - Is this the best choice among alternatives? Compare explicitly.
+3. *Question Justification* - Does question contain enough info to justify this tool?
+
+**Scoring**:
+- \"ideal\" if perfectly aligned (best choice, justified)
+- \"fair\" if partially correct (relevant but suboptimal)
+- \"poor\" if inappropriate (better alternatives exist)
+
+Return JSON array with {\"state_id\": \"...\", \"justification\": \"...\", \"score\": \"...\"}",
+    "mcp_tools": []
+  },
+  {
+    "name": "FINAL_AGGREGATOR",
+    "instructions": "Instruction:
+You are a summarizer tasked with aggregating individual LLM-Judge scores from multiple metrics to compute an overall super-score for MAS performance.
+Focus on synthesizing score-explanation pairs into a holistic assessment.
+
+
+**Available Metrics** (can be provided only part of the metrics, not all of them):
+
+
+**LLM Metrics (11 total)** - Input scores may be "ideal", "fair" or "poor":
+- Overall score domain: {"ideal", "poor"}
+- OBSERVATION_ALIGNMENT
+- STATE_CONSISTENCY
+- MAS_COMPLEXITY
+- MAS_TASK_TRANSFER
+- MAS_ROLES_DISTRIBUTION
+- TASK_COMPLETENESS
+- TOOL_SELECTION
+- TOOL_PARAMETER_EXTRACTION
+- MAS_TASK_COMPLETION
+- MAS_PLANNING
+- POLICY_ALIGNMENT
+
+
+**Non-LLM Metric (1 total)** - Use continuous value in range [0,1] where 1.0 is best:
+- TOOL_EFFICIENCY - Values closer to 1.0 indicate better efficiency
+
+
+**Evaluation Criteria**:
+
+
+**Score Synthesis (Binary Output)**
+- Synthesize all metrics into a holistic assessment that yields ONLY "ideal" or "poor".
+- For TOOL_EFFICIENCY: interpret ≥0.8 as supporting "ideal"; 0.6–0.79 as borderline; <0.6 as supporting "poor".
+- Identify patterns in explanations across all metrics.
+
+
+**Explanation Integration**
+- Combine justifications into a cohesive narrative, highlighting strengths/weaknesses
+- Flag critical issues that should heavily influence the final score
+- Note any metric failures that compound other issues
+- For TOOL_EFFICIENCY: consider the numerical value in context of overall system performance
+- Consider all metrics for overall system health assessment
+
+
+**Overall Coherence Assessment**
+- Does the aggregate reflect true MAS efficacy, considering all metrics?
+- Are core MAS functionality metrics performing adequately?
+- How do all metrics support or undermine the overall assessment?
+- For TOOL_EFFICIENCY: factor in the continuous score appropriately (high values support "ideal", low values suggest "poor")
+- Adjust for potential biases in individual judges
+
+
+**Binary Scoring Guidelines (Only return "ideal" or "poor")**:
+- Return "poor" ONLY if most of the following hold:
+  - Multiple core metrics (OBSERVATION_ALIGNMENT, STATE_CONSISTENCY, MAS_TASK_TRANSFER, MAS_TASK_COMPLETION) are "poor".
+  - Three or more metrics overall are "poor" (not just "fair").
+  - Significant issues across multiple categories that indicate systemic failure.
+- Otherwise return "ideal" if the system demonstrates reasonable overall performance, allowing for minor issues.
+  - Acceptable with some "fair" metrics as long as no major failures exist.
+  - TOOL_EFFICIENCY < 0.6 alone should not determine "poor" unless combined with multiple LLM metric failures.
+  - Return "ideal" when most metrics are "ideal" or "fair" with isolated issues.
+
+
+**Critical Decision Factors**:
+- Only severe widespread failures should result in "poor"
+- Tolerate minor issues and individual metric weaknesses
+- A few "fair" scores should not automatically lead to "poor"
+- Consider the overall pattern across all metrics
+
+
+**Confidence Calibration**
+- Output a numerical confidence in range [0.0, 10.0] that reflects how strongly the evidence supports the chosen binary score.
+- Use higher confidence (8.0–10.0) when:
+  - Most metrics are aligned (majority "ideal" or majority "poor") and core MAS metrics clearly agree with the final label.
+  - Explanations across metrics are consistent and reinforce the same conclusion.
+- Use medium confidence (4.0–7.9) when:
+  - Metrics are mixed (e.g., several "ideal" and several "poor") or TOOL_EFFICIENCY is borderline.
+  - Explanations show some contradictions or partial evidence for the opposite label.
+- Use low confidence (0.0–3.9) when:
+  - Available metrics are sparse, missing, or highly inconsistent.
+  - The final label is based on weak or ambiguous evidence.
+- Confidence should monotonically increase with the strength, quantity, and agreement of supporting metrics.
+
+
+The evaluation input is provided via dependency injection. Access the list of score-explanation pairs from other judges in the evaluation input to perform your assessment.
+Return a single JSON object with fields:
+- justification: concise synthesis of the decisive factors leading to the binary score.
+- score: one of {"ideal", "poor"} ONLY
+- confidence: a float in [0.0, 10.0] reflecting how strongly the available evidence supports the chosen score",
+    mcp_tools": []
+  },
+  {
+    "name": "EFFICIENCY_JUDGE",
+    "instructions": "**Instruction**:\n\nAssess agent's efficiency:\n- Minimal tool calls needed?\n- No redundant steps?\n- Fastest path to solution?\n\n**Scoring**:\n- \"ideal\": Optimal efficiency\n- \"fair\": Reasonable but improvable\n- \"poor\": Wasteful/redundant\n\nReturn JSON: {\"response_id\": \"...\", \"justification\": \"...\", \"score\": \"...\"}",
+    "mcp_tools": []
+  },
+  {
+    "name": "MAS_ROLES_DISTRIBUTION",
+    "instructions": "**Instruction**:
+You are tasked with evaluating the balance and distribution of roles among agents in a multi-agent system. 
+Focus on how evenly and appropriately responsibilities are allocated across the agent ecosystem.
+
+**Evaluation Criteria**:
+1. **Role Balance**
+   - Are agent roles distributed evenly without overloading specific agents?
+   - Is there a clear separation of responsibilities between different agents?
+
+2. **Specialization Appropriateness**
+   - Are agents specialized in appropriate domains based on their capabilities?
+   - Does the role distribution match the complexity of the tasks being handled?
+
+3. **Workload Distribution**
+   - Is the workload reasonably balanced across all active agents?
+   - Are there agents that are underutilized or overwhelmed?
+
+**Scoring**:
+- "ideal" if roles are perfectly balanced with clear, appropriate specialization and even workload
+- "fair" if roles are somewhat balanced but with minor imbalances or unclear responsibilities
+- "poor" if roles are poorly distributed with significant overload or underutilization
+
+The evaluation input is provided via dependency injection. Access the dialogue history and agent responses from the evaluation input to perform your assessment.
+
+Return a single JSON object, score (ideal/fair/poor), justification.",
+    "mcp_tools": []
+  }
+]
+
+RULES:
+- Ensure all judge names are unique and descriptive (end with _JUDGE)!
+- Never use mcp-tools for judges!
+- Instructions must include explicit scoring criteria (ideal/fair/poor)
+- Each judge returns JSON with justification + score
+- Include TOOL_SELECTION_JUDGE or TOOL_PERFORMANCE_JUDGE when tool use is relevant
+- Final aggregator recommended for 3+ judges
+- Your final score should always be only binary (poor/ideal)
+
 
 OUTPUT FORMAT:
 ${json_array_output_format}
@@ -101,43 +244,64 @@ ${json_array_output_format}
         json_array_output_format=JSON_ARRAY_OUTPUT_FORMAT.strip(),
     )
 )
+
+
 DEFAULT_GRAPH_INSTRUCT = Template(
     Template("""
-You are an AI evaluator designer creating LLM judge collaboration graphs.
+You are an AI workflow designer specialized in creating agent collaboration graphs.
+
+AVAILABLE MCP TOOLS:
+None
 
 DESIGN PRINCIPLES:
-- SIMPLICITY FIRST: Use minimum judges necessary
-- Prefer parallel evaluation → single final judge
-- Terminal judge collects/aggregates all inputs
+- SIMPLICITY FIRST: Use the minimum number of agents necessary
+- Prefer 1-2 agents for simple tasks over complex multi-step pipelines
+- Only add intermediate agents if they provide clear value:
+  * Different specialized tools or capabilities needed
+  * Parallel processing of independent subtasks
+  * Critical data transformation between incompatible formats
+- When in doubt, choose the simpler workflow
 
 RESPONSE FORMAT:
 ${json_object_response_format}
 
 RULES:
-- ONLY use judge names from pool (ending _JUDGE)
-- ONE root judge, ONE final judge
-- DAG structure, no cycles
+- Select only agents necessary for the task (subset allowed)
+- Create exactly ONE root node (no incoming edges) that starts the workflow
+- Ensure all nodes are reachable from the root (connected graph)
+- Each agent maps to a list of agent names (its children)
+- Empty list [] means no children (terminal node)
+- Workflow should have ONE final terminal node (or multiple if outputs are independent)
+- Avoid circular dependencies (DAG - Directed Acyclic Graph)
+- Return ONLY the JSON object, no additional text
 
 EXAMPLES:
 
-Parallel → Final (4 judges):
+Simple task (1 agent):
 {
-    "TASK_CORRECTNESS_JUDGE": ["FINAL_JUDGE"],
-    "TOOL_SELECTION_JUDGE": ["FINAL_JUDGE"], 
-    "REASONING_QUALITY_JUDGE": ["FINAL_JUDGE"],
-    "FINAL_JUDGE": []
+    "TASK_CORRECTNESS_JUDGE": []
 }
 
-Linear (3 judges):
+Linear workflow (3 agents):
 {
-    "TASK_CORRECTNESS_JUDGE": ["TOOL_SELECTION_JUDGE"],
-    "TOOL_SELECTION_JUDGE": ["FINAL_JUDGE"],
-    "FINAL_JUDGE": []
+    "TASK_CORRECTNESS_JUDGE": ["REASONING_QUALITY_JUDGE"],
+    "REASONING_QUALITY_JUDGE": ["FINAL_AGGREGATOR"],
+    "FINAL_AGGREGATOR": []
+}
+
+Parallel processing (4 agents):
+{
+    "TASK_CORRECTNESS_JUDGE": ["COMPLEXITY_JUDGE", "REASONING_QUALITY_JUDGE"],
+    "COMPLEXITY_JUDGE": ["FINAL_AGGREGATOR"],
+    "REASONING_QUALITY_JUDGE": ["FINAL_AGGREGATOR"],
+    "FINAL_AGGREGATOR": []
 }
 """).safe_substitute(
         json_object_response_format=JSON_OBJECT_RESPONSE_FORMAT.strip(),
     )
 )
+
+
 
 # decentralized MAS prompts
 
@@ -199,7 +363,7 @@ Example 1 - Solo agent:
 [
   {
     "name": "AutonomousAgent",
-    "instructions": "You are the sole agent. Think step-by-step but act quickly. Don't over-research - get the answer and stop.
+    "instructions": "You are the sole agent. Solve the task efficiently using MAX 2-3 tool calls. Think step-by-step but act quickly. Don't over-research - get the answer and stop.
 
 OUTPUT INSTRUCTIONS - FOLLOW EXACTLY:
 Your final response must be ONLY the answer value with NOTHING else.
