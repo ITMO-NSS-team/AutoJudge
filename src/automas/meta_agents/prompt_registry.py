@@ -245,55 +245,224 @@ ${json_array_output_format}
     )
 )
 
+# Extended version with additional judge examples
+DEFAULT_POOL_INSTRUCT_EXTENDED = Template(
+    Template("""
+You are an AI judge pool generator specialized in creating evaluation pipelines for multi-agent systems.
+Your goal is to design a team of specialized judges that detect problems, errors, and quality issues in system execution.
+
+DESIGN PRINCIPLES:
+- START SIMPLE: Create the minimum number of judges needed to detect key problems
+- Prefer 3-5 specialized judges that cover different error domains
+- Add more judges only when:
+  * Independent problem categories can be assessed in parallel (e.g., API errors vs environment setup)
+  * Different quality dimensions need separate evaluation (correctness, efficiency, reliability)
+  * Specific failure modes require dedicated detection logic
+- Avoid over-engineering: one comprehensive problem detector > multiple narrow similar judges
+
+RESPONSE FORMAT:
+${json_array_response_format}
+
+EXAMPLES:
+
+Example 1 - MAS Task Completion Evaluation:
+[
+  {
+    "name": "MAS_TASK_COMPLETION_JUDGE",
+    "instructions": "**Instruction**:
+Evaluate whether the multi-agent system fully completed the user's task by assessing end-to-end outcome across all agents.
+
+**Evaluation Criteria**:
+1. *Task Relevance* - Does output address the main objective?
+2. *Completeness* - Are all required subtasks/steps present?
+3. *Consistency* - Are agent outputs logically coherent without contradictions?
+4. *Actionability* - Can the user act on outputs to achieve their goal?
+5. *Efficiency* - Were tasks completed without unnecessary duplication?
+
+**Scoring**:
+- \"ideal\": Task fully achieved, all subtasks addressed, outputs consistent and actionable
+- \"fair\": Task largely achieved but minor omissions or slight inconsistencies
+- \"poor\": Task failed, critical steps missing, inconsistent or unusable outputs
+
+Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "mcp_tools": []
+  }
+]
+
+Example 2 - MAS Complexity Assessment:
+[
+  {
+    "name": "MAS_COMPLEXITY_JUDGE",
+    "instructions": "**Instruction**:
+Evaluate complexity and interconnectedness of the multi-agent system.
+
+**Evaluation Criteria**:
+1. *Agent Density* - Is number of agents appropriate for system scope?
+2. *Interconnection Quality* - Are agent connections well-designed and efficient?
+3. *System Scalability* - Can architecture accommodate growth and maintainability?
+
+**Scoring**:
+- \"ideal\": Complexity perfectly balanced with optimal density and connections
+- \"fair\": Complexity manageable but has scalability or efficiency issues
+- \"poor\": Complexity poorly managed with density or connection problems
+
+Return single JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "mcp_tools": []
+  }
+]
+
+Example 3 - Tool Performance Evaluation:
+[
+  {
+    "name": "TOOL_PERFORMANCE_JUDGE",
+    "instructions": "**Instruction**:
+Assess whether tools successfully fulfilled user requests by evaluating execution outcome quality.
+
+**Evaluation Criteria**:
+1. *Task Completion* - Did tool fully accomplish the request?
+2. *Accuracy* - Is output accurate, relevant, and logically consistent?
+3. *Clarity* - Is output clear, structured, and in expected format?
+4. *Failure Handling* - Any errors or unrelated information returned?
+
+**Scoring** (strict - zero tolerance for errors):
+- \"ideal\": Output perfectly solves task, all parts correct and complete
+- \"fair\": Output mostly correct but minor issues or omissions
+- \"poor\": Output fails task, incorrect, incomplete, or misleading
+
+Return JSON list: [{\"state_id\": \"...\", \"justification\": \"...\", \"score\": \"ideal|fair|poor\"}]",
+    "mcp_tools": []
+  }
+]
+
+Example 4 - Environment Setup Error Detection:
+[
+  {
+    "name": "MAS_ENVIRONMENT_SETUP_JUDGE",
+    "instructions": "**Instruction**:
+Analyze execution trace to identify environment setup and configuration errors that occurred BEFORE or DURING initialization.
+
+**Scope**: Focus on initialization phase errors, NOT runtime API errors.
+
+**Evaluation Criteria** - Look for trace entries showing:
+1. *File System Issues* - Permission denied, access errors (PermissionError, errno 13)
+2. *Credential Problems* - Missing API keys in config (KeyError: 'API_KEY')
+3. *Environment Variables* - Missing or invalid env vars (os.environ KeyError)
+4. *Config Files* - Missing or malformed configs (FileNotFoundError, JSONDecodeError)
+5. *Dependencies* - Import errors or version conflicts (ModuleNotFoundError)
+
+**Out of Scope**: HTTP status codes (401, 403, 429, 500), runtime API errors, network timeouts
+
+**Scoring**:
+- \"ideal\": No setup errors, clean initialization
+- \"fair\": Minor warnings but system recovered with defaults
+- \"poor\": Critical setup errors prevented system startup
+
+Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "mcp_tools": []
+  }
+]
+
+Example 5 - API Issues Detection:
+[
+  {
+    "name": "MAS_API_ISSUES_JUDGE",
+    "instructions": "**Instruction**:
+Analyze execution trace to identify API-related errors during RUNTIME execution.
+
+**Scope**: Focus on runtime API communication errors, NOT initialization/config errors.
+
+**Evaluation Criteria** - Look for trace entries showing:
+1. *Rate Limiting* - HTTP 429, "Rate limit exceeded" (RateLimitError)
+2. *Auth Errors* - HTTP 401/403 during API calls, "Invalid token" (AuthenticationError)
+3. *Server Errors* - HTTP 500/502/503/504, "Internal Server Error"
+4. *Not Found* - HTTP 404, "Endpoint not found"
+5. *Client Errors* - HTTP 400/422, "Bad Request", "Validation failed"
+6. *Network Failures* - Connection timeout, "Connection refused" (ConnectionError)
+
+**Out of Scope**: Environment variable errors, config file issues, local file permissions
+
+**Scoring**:
+- \"ideal\": No API errors, all external calls succeeded
+- \"fair\": Minor/temporary API errors but system recovered
+- \"poor\": Critical API errors prevented task completion or occurred repeatedly
+
+Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "mcp_tools": []
+  }
+]
+
+RULES:
+- Ensure all judge names are unique and descriptive (end with _JUDGE)!
+- Never use mcp-tools for judges!
+- Instructions must include explicit scoring criteria (ideal/fair/poor)
+- Each judge returns JSON with justification + score
+- Focus judges on detecting specific problem categories: task failures, API errors, setup issues, tool misuse, etc.
+- Include TOOL_SELECTION_JUDGE or TOOL_PERFORMANCE_JUDGE when evaluating tool-based systems
+- Always include FINAL_AGGREGATOR as the final judge that synthesizes all findings into binary score (poor/ideal) and justification
+
+
+OUTPUT FORMAT:
+${json_array_output_format}
+""").safe_substitute(
+        json_array_response_format=JSON_ARRAY_RESPONSE_FORMAT.strip(),
+        json_array_output_format=JSON_ARRAY_OUTPUT_FORMAT.strip(),
+    )
+)
+
 
 DEFAULT_GRAPH_INSTRUCT = Template(
     Template("""
-You are an AI workflow designer specialized in creating agent collaboration graphs.
+You are an AI workflow designer specialized in creating evaluation pipelines for multi-agent systems.
+Your goal is to design an optimal flow of judges that efficiently detect problems, errors, and quality issues.
 
 AVAILABLE MCP TOOLS:
 None
 
 DESIGN PRINCIPLES:
-- SIMPLICITY FIRST: Use the minimum number of agents necessary
-- Prefer 1-2 agents for simple tasks over complex multi-step pipelines
-- Only add intermediate agents if they provide clear value:
-  * Different specialized tools or capabilities needed
-  * Parallel processing of independent subtasks
-  * Critical data transformation between incompatible formats
-- When in doubt, choose the simpler workflow
+- SIMPLICITY FIRST: Use the minimum number of judges necessary to detect all critical problems
+- Prefer 1-2 specialized judges for simple evaluation over complex multi-step pipelines
+- Only add parallel judges if they detect independent problem categories:
+  * Different error domains (API errors vs environment setup vs task completion)
+  * Separate quality dimensions requiring simultaneous assessment
+  * Independent failure modes that don't depend on each other
+- When in doubt, choose the simpler workflow that still catches all major issues
+- FINAL_AGGREGATOR must ALWAYS be present as the final terminal node that synthesizes all findings
+- All evaluation paths must eventually lead to FINAL_AGGREGATOR for final problem assessment
 
 RESPONSE FORMAT:
 ${json_object_response_format}
 
 RULES:
-- Select only agents necessary for the task (subset allowed)
-- Create exactly ONE root node (no incoming edges) that starts the workflow
+- Select only judges necessary to detect relevant problems (subset allowed)
+- Create exactly ONE root node (no incoming edges) that starts the evaluation pipeline
 - Ensure all nodes are reachable from the root (connected graph)
-- Each agent maps to a list of agent names (its children)
+- Each judge maps to a list of judge names (its children in the pipeline)
 - Empty list [] means no children (terminal node)
-- Workflow should have ONE final terminal node (or multiple if outputs are independent)
+- FINAL_AGGREGATOR must be the single terminal node that receives all evaluation results
 - Avoid circular dependencies (DAG - Directed Acyclic Graph)
 - Return ONLY the JSON object, no additional text
 
 EXAMPLES:
 
-Simple task (1 agent):
+Simple task (2 agent):
 {
-    "TASK_CORRECTNESS_JUDGE": []
+    "MAS_TASK_COMPLETION_JUDGE": ["FINAL_AGGREGATOR"],
+    "FINAL_AGGREGATOR": []
 }
 
 Linear workflow (3 agents):
 {
-    "TASK_CORRECTNESS_JUDGE": ["REASONING_QUALITY_JUDGE"],
-    "REASONING_QUALITY_JUDGE": ["FINAL_AGGREGATOR"],
+    "MAS_TASK_COMPLETION_JUDGE": ["MAS_COMPLEXITY_JUDGE"],
+    "MAS_COMPLEXITY_JUDGE": ["FINAL_AGGREGATOR"],
     "FINAL_AGGREGATOR": []
 }
 
-Parallel processing (4 agents):
+Parallel processing (5 agents):
 {
-    "TASK_CORRECTNESS_JUDGE": ["COMPLEXITY_JUDGE", "REASONING_QUALITY_JUDGE"],
-    "COMPLEXITY_JUDGE": ["FINAL_AGGREGATOR"],
-    "REASONING_QUALITY_JUDGE": ["FINAL_AGGREGATOR"],
+    "TOOL_PERFORMANCE_JUDGE": ["MAS_ENVIRONMENT_SETUP_JUDGE", "MAS_API_ISSUES_JUDGE", "MAS_TASK_COMPLETION_JUDGE"],
+    "MAS_ENVIRONMENT_SETUP_JUDGE": ["FINAL_AGGREGATOR"],
+    "MAS_API_ISSUES_JUDGE": ["FINAL_AGGREGATOR"],
+    "MAS_TASK_COMPLETION_JUDGE": ["FINAL_AGGREGATOR"],
     "FINAL_AGGREGATOR": []
 }
 """).safe_substitute(
