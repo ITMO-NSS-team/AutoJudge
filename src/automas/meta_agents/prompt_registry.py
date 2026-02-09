@@ -400,6 +400,32 @@ RULES:
 - Include TOOL_SELECTION_JUDGE or TOOL_PERFORMANCE_JUDGE when evaluating tool-based systems
 - Always include FINAL_AGGREGATOR as the final judge that synthesizes all findings into binary score (poor/ideal) and justification
 
+**CRITICAL: FINAL_AGGREGATOR OUTPUT FORMAT:**
+FINAL_AGGREGATOR must include these exact instructions at the end:
+
+"**OUTPUT FORMAT - STRICTLY REQUIRED:**
+You MUST return ONLY a valid JSON object with exactly these two fields:
+{
+  \"score\": \"ideal or poor\",
+  \"justification\": \"string\"
+}
+
+**CRITICAL RULES:**
+- Return ONLY the JSON object, nothing else
+- NO markdown code fences (no ```json or ```)
+- NO explanatory text before or after the JSON
+- NO additional fields (no confidence, no metadata)
+- score must be exactly \"ideal\" or \"poor\" (lowercase)
+- justification must be a single string (concise, 1-3 sentences)
+
+**VALID EXAMPLE:**
+{\"score\": \"ideal\", \"justification\": \"System demonstrates strong performance across all metrics.\"}
+
+**INVALID EXAMPLES:**
+- ```json{\"score\": \"ideal\"}```  ← NO markdown fences
+- Here is my assessment: {\"score\": \"ideal\"}  ← NO extra text
+- {\"score\": \"IDEAL\"}  ← must be lowercase"
+
 
 OUTPUT FORMAT:
 ${json_array_output_format}
@@ -1147,3 +1173,54 @@ ${json_object_output_format}
         json_object_output_format=JSON_OBJECT_OUTPUT_FORMAT.strip(),
     )
 )
+
+
+# Trace summarization prompt
+TRACE_SUMMARIZATION_PROMPT = """
+Analyze the multi-agent system execution trace and create a concise summary.
+
+**REQUIRED OUTPUT:**
+
+1. **Step-by-Step Log**: Extract ALL execution steps chronologically
+   - Format: "Step N. [Agent] action_type: description"
+   - Include: tool calls, reasoning, communication, errors
+   - Examples:
+     * "Step 1. ResearchAgent tool_call: web-search 'Tokyo population'"
+     * "Step 2. DataAgent tool_call: read 'data.csv' (Error: FileNotFoundError)"
+
+2. **Brief Overview**:
+   - Original task
+   - System type (decentralized/ReAct/hierarchical)
+   - Total agents
+   - Key agents and their roles
+
+**JSON OUTPUT FORMAT:**
+
+{
+  "step_by_step_log": [
+    {
+      "step_number": 1,
+      "agent_name": "string",
+      "action_type": "tool_call|reasoning|communication|output|error",
+      "description": "string - what was done",
+      "error_message": "string or null",
+      "key_data": "string or null"
+    }
+  ],
+  "task_overview": {
+    "original_query": "string",
+    "system_type": "string",
+    "total_agents": "number"
+  },
+  "agents_summary": [
+    {
+      "agent_name": "string",
+      "role": "string",
+      "key_contributions": "string",
+      "issues": "string or null"
+    }
+  ]
+}
+
+Keep descriptions concise. Extract ALL steps from trace.
+"""
