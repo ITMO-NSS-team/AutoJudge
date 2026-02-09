@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from automas.agent_pool import AgentPool
 from automas.mcp.registry import get_server_descriptions
 from automas.pipeline.node import AgentNode
-from automas.utils.logger import get_logger
+from automas.utils import get_logger
 
 from .base import DEFAULT_MODEL, BaseMetaAgent
 from .prompt_registry import DEFAULT_POOL_INSTRUCT_EXTENDED
@@ -26,15 +26,25 @@ class PoolGenerator(BaseMetaAgent):
         self,
         model: str = DEFAULT_MODEL,
         temperature: float = 0.3,
+        output_schema: str = "",
+        taxonomy: str = "",
+        examples: str = ""
     ):
+        self.schema = output_schema
+        self.taxonomy = taxonomy
+        self.examples = examples
         super().__init__(
             model=model,
             temperature=temperature,
         )
 
+
     def _get_system_prompt(self) -> str:
         mcp_servers_desc = get_server_descriptions()
-        return DEFAULT_POOL_INSTRUCT_EXTENDED.substitute(mcp_servers_desc=mcp_servers_desc)
+        return DEFAULT_POOL_INSTRUCT_EXTENDED.substitute(
+            mcp_servers_desc=mcp_servers_desc, taxonomy=self.taxonomy, 
+            judge_output_format=self.schema, examples=self.examples
+        )
 
     def _get_output_type(self):
         return list[AgentSchema]
