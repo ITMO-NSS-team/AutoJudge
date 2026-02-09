@@ -8,63 +8,68 @@ from automas.meta_agents import GraphGenerator, PoolGenerator
 from automas.pipeline import PipelineBuilder
 from automas.utils.langfuse_utils import ainvoke_with_lf
 from automas.utils import get_logger
-from maseval import get_langfuse_download_client, get_langfuse_judge_client
-from maseval.parsers.langfuse_parser_v3 import parse_langfuse_task
+from maseval import get_langfuse_judge_client
 from dotenv import load_dotenv
 import json
 import os
+import pandas as pd
 
 load_dotenv(".env")
 logger = get_logger(__name__)
 
-async def main(name: str, save_folder: str):
-    logger.info(f"Starting GAIA evaluation for task name: {name}")
+async def main(save_folder: str, df):
+    logger.info(f"===Starting Who&When evaluation===")
     
     pool_gen = PoolGenerator()
     graph_gen = GraphGenerator()
-    lf = get_langfuse_download_client()
     judge_client = get_langfuse_judge_client()
-    logger.info("Initialized generators and Langfuse clients")
-
-    traces_page1 = lf.api.trace.list(name=name, limit=30, page=1)
-    logger.info(f"Retrieved {len(traces_page1.data)} traces from Langfuse")
+    logger.info("Initialized generators and Langfuse client")
     
-    # quick fix
+    # continue processing that was already started
     # ======================
     done_traces = []
-    for res in os.listdir(f"/home/user/Desktop/AutoMAS/AutoJudge/examples/{save_folder}"):
-        res_cropped = res.split(".")[0]
-        done_traces.append(res_cropped)
+    local_results_dir = (Path(__file__).resolve().parent / "results" / save_folder)
+    results_dir = local_results_dir
+
+    if results_dir.exists():
+        for res in os.listdir(results_dir):
+            res_cropped = res.split(".")[0]
+            done_traces.append(res_cropped)
     # ======================
 
     failed_traces = [] 
     
-    for idx, task in enumerate(traces_page1.data):
-        if task.id in done_traces:
-            logger.info(f"Task {task.id} already processed, skipping...")
+    for idx in range(len(df)):
+        if df.iloc[idx]["question_ID"] in done_traces:
+            logger.info(f"Task {df.iloc[idx]["question_ID"]} already processed, skipping...")
             continue
         
-        logger.info(f"Processing task {idx + 1}/{len(traces_page1.data)}: {task.id}")
+        logger.info(f"Processing task {idx + 1}/{len(df)}: {df.iloc[idx]["question_ID"]}")
         serializable_results = {}
         
         try:
-            trace_data = lf.api.trace.get(task.id)
-            query = parse_langfuse_task(trace_data)
-            logger.debug(f"Parsed task query: {query.user_query[:100]}...")
+            trace_data = {
+            "history": df.iloc[idx]["history"],
+            "question": df.iloc[idx]["question"],
+            "task_id": df.iloc[idx]["question_ID"],
+            "trace_id": df.iloc[idx]["question_ID"],
+            }
+
+            logger.debug(f"Parsed task query: {trace_data["question"][:100]}...")
             
-            trace_metadata = {"task_id": task.id}
-            if hasattr(trace_data, "output") and trace_data.output:
-                if "ground_truth" in trace_data.output:
-                    trace_metadata["ground_truth"] = trace_data.output["ground_truth"]
-                if "response" in trace_data.output:
-                    trace_metadata["mas_response"] = trace_data.output["response"]
-                if "ground_truth" in trace_data.output and "response" in trace_data.output:
-                    trace_metadata["correct_answer"] = (
-                        trace_data.output["response"] == trace_data.output["ground_truth"]
-                    )
-                    logger.debug(f"Correct answer: {trace_metadata['correct_answer']}")
+            trace_metadata = {
+                "task_id": trace_data["task_id"],
+                "trace_id": trace_data["trace_id"]
+                }
+
+            if 'groundtruth' in df.iloc[idx].keys():
+                trace_metadata["ground_truth"] = df.iloc[idx]["groundtruth"]
+                trace_metadata["correct_answer"] = df.iloc[idx]["is_corrected"]
+            else:
+                trace_metadata["ground_truth"] = df.iloc[idx]["ground_truth"]
+                trace_metadata["correct_answer"] = df.iloc[idx]["is_correct"]
             
-            judge_input = str({"query": query.user_query, "history_for_evaluating": query.agent_states})
+            judge_input = str({"query": trace_data["question"], "history_for_evaluating": trace_data["history"]})
             
             logger.info("Generating judge pool...")
             pool = await pool_gen.create_pool(judge_input)
@@ -80,12 +85,12 @@ async def main(name: str, save_folder: str):
             logger.info(f"Built pipeline with {len(pipeline.execution_order)} nodes")
 
             with judge_client.start_as_current_span(
-                name=f"evaluate_task_{task.id}",
-                input={"task_id": task.id, "trace_id": task.id},
+                name=f"evaluate_task_{df.iloc[idx]["question_ID"]}",
+                input={"task_id": df.iloc[idx]["question_ID"], "trace_id": df.iloc[idx]["question_ID"]},
                 metadata=trace_metadata,
             ) as span:
                 judge_client.update_current_trace(
-                    tags=["gaia_eval_30_traces", f"task_id:{task.id}"]
+                    tags=["who_and_when_eval_30_traces", f"task_id:{df.iloc[idx]["question_ID"]}"]
                 )
                 
                 logger.info("Executing evaluation pipeline...")
@@ -108,9 +113,9 @@ async def main(name: str, save_folder: str):
                             ],
                         }
 
-            output_dir = Path(__file__).parent / save_folder
-            output_dir.mkdir(exist_ok=True)
-            output_file = output_dir / Path(f"{task.id}.json")
+            output_dir = local_results_dir
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_file = output_dir / Path(f"{df.iloc[idx]['question_ID']}.json")
 
             with open(output_file, "w") as f:
                 json.dump(serializable_results, f, indent=2)
@@ -119,36 +124,36 @@ async def main(name: str, save_folder: str):
 
             print(f"Result: {result}")
             print(f"Langfuse trace ID: {trace_id}")
-            print(f"Launch № {idx + 1} from {len(traces_page1.data)}")
             
         except Exception as e:
             error_msg = str(e)
             safe_error_msg = error_msg.replace("{", "{{").replace("}", "}}")
-            logger.error(f"Error processing task {task.id}: {safe_error_msg}", exc_info=True)
+            task_id = df.iloc[idx]["question_ID"]
+            logger.error(f"Error processing task {task_id}: {safe_error_msg}", exc_info=True)
             
             failed_traces.append({
-                "task_id": task.id,
+                "task_id": task_id,
                 "task_index": idx + 1,
                 "error": error_msg,
                 "error_type": type(e).__name__
             })
             
-            print(f"\n!  Failed task {idx + 1}/{len(traces_page1.data)}: {task.id}")
+            print(f"\n!  Failed task {idx + 1}/{len(df)}: {task_id}")
             print(f"   Error: {error_msg}\n")
             continue 
     
     if failed_traces:
-        output_dir = Path(__file__).parent / save_folder
-        output_dir.mkdir(exist_ok=True)
+        output_dir = local_results_dir
+        output_dir.mkdir(parents=True, exist_ok=True)
         failed_file = output_dir / "failed_traces.txt"
         
         with open(failed_file, "w") as f:
-            f.write(f"Failed traces: {len(failed_traces)} out of {len(traces_page1.data)}\n")
+            f.write(f"Failed traces: {len(failed_traces)} out of {len(df)}\n")
             f.write("=" * 80 + "\n\n")
             
             for failed in failed_traces:
                 f.write(f"Task ID: {failed['task_id']}\n")
-                f.write(f"Index: {failed['task_index']}/{len(traces_page1.data)}\n")
+                f.write(f"Index: {failed['task_index']}/{len(df)}\n")
                 f.write(f"Error Type: {failed['error_type']}\n")
                 f.write(f"Error Message: {failed['error']}\n")
                 f.write("-" * 80 + "\n\n")
@@ -156,11 +161,14 @@ async def main(name: str, save_folder: str):
         logger.warning(f"\n!  {len(failed_traces)} traces failed. Details saved to: {failed_file}\n")
         print(f"\n!  {len(failed_traces)} traces failed. Details saved to: {failed_file}\n")
     
-    logger.info(f"Completed evaluation: {len(traces_page1.data) - len(failed_traces)}/{len(traces_page1.data)} successful, {len(failed_traces)} failed")
+    logger.info(f"Completed evaluation: {len(df) - len(failed_traces)}/{len(df)} successful, {len(failed_traces)} failed")
 
 
 if __name__ == "__main__":
+    df_handcrafted = pd.read_parquet("hf://datasets/Kevin355/Who_and_When/Hand-Crafted.parquet")
+    # df_algorithm = pd.read_parquet("hf://datasets/Kevin355/Who_and_When/Algorithm-Generated.parquet")
+
     asyncio.run(main(
-        name="gaia_task_07aac7b1-ffc3-4787-8e4c-7fb522156097",
-        save_folder="gaia_res_30_traces"
+        save_folder="who_and_when_res_30_traces",
+        df=df_handcrafted[:30]
     ))

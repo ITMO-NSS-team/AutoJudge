@@ -9,7 +9,7 @@ from automas.pipeline.node import AgentNode
 from automas.utils.logger import get_logger
 
 from .base import DEFAULT_MODEL, BaseMetaAgent
-from .prompt_registry import DEFAULT_POOL_INSTRUCT
+from .prompt_registry import DEFAULT_POOL_INSTRUCT_EXTENDED
 
 logger = get_logger()
 
@@ -34,7 +34,7 @@ class PoolGenerator(BaseMetaAgent):
 
     def _get_system_prompt(self) -> str:
         mcp_servers_desc = get_server_descriptions()
-        return DEFAULT_POOL_INSTRUCT.substitute(mcp_servers_desc=mcp_servers_desc)
+        return DEFAULT_POOL_INSTRUCT_EXTENDED.substitute(mcp_servers_desc=mcp_servers_desc)
 
     def _get_output_type(self):
         return list[AgentSchema]
