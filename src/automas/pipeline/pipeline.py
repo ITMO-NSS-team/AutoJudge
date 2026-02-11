@@ -176,6 +176,7 @@ class Pipeline:
         self._trace.final_output = final_output
 
         logger.info(f"Pipeline completed. Final result from: {final_node.name}")
+        print(final_output)
         return final_output
 
     def invoke(self, query: Any) -> Any:

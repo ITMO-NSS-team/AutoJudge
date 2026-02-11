@@ -3,24 +3,179 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import asyncio
+import os
+from dotenv import load_dotenv
+
+load_dotenv(".env")
 
 from automas.meta_agents import GraphGenerator, PoolGenerator
 from automas.pipeline import PipelineBuilder
 from automas.utils.langfuse_utils import ainvoke_with_lf
 from automas.utils import get_logger
 from maseval import get_langfuse_judge_client
-from dotenv import load_dotenv
 import json
-import os
 import pandas as pd
 
-load_dotenv(".env")
 logger = get_logger(__name__)
+
+taxonomy = """
+1) Guilty agent
+2) Step of error
+"""
+
+output_schema = """
+**OUTPUT FORMAT - STRICTLY REQUIRED:**
+You must determine the most guilty agent in the evaluated 'history_for_evaluating', based on what the other judges wrote. You MUST return ONLY a valid JSON object with exactly these two fields:
+{
+  \"agent\": \"Guilty Agent name from trace here",
+  \"step\": \"id (number!) of step here\",
+  \"reason\": \"reason of your prediction\",
+}
+
+**VALID EXAMPLE:**
+{
+  \"agent\": \"File_Surfer\",
+  \"step\": \"1\",
+  \"reason\": \"The agent fails to collect price data for the daily tickets and season passes for California's Great America in 2024.\",
+}
+
+**INVALID EXAMPLES:**
+- ```json{\"score\": \"ideal\"}``` 
+- Here is my assessment: {\"score\": \"ideal\"} 
+- {\"score\": \"IDEAL\"}"""
+
+examples = """
+Example 1 - MAS Task Completion Evaluation:
+[
+  {
+    "name": "MAS_TASK_COMPLETION_JUDGE",
+    "instructions": "**Instruction**:
+Evaluate whether the multi-agent system fully completed the user's task by assessing end-to-end outcome across all agents.
+
+**Evaluation Criteria**:
+1. *Task Relevance* - Does output address the main objective?
+2. *Completeness* - Are all required subtasks/steps present?
+3. *Consistency* - Are agent outputs logically coherent without contradictions?
+4. *Actionability* - Can the user act on outputs to achieve their goal?
+5. *Efficiency* - Were tasks completed without unnecessary duplication?
+
+**Scoring**:
+- \"ideal\": Task fully achieved, all subtasks addressed, outputs consistent and actionable
+- \"fair\": Task largely achieved but minor omissions or slight inconsistencies
+- \"poor\": Task failed, critical steps missing, inconsistent or unusable outputs
+
+Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "mcp_tools": []
+  }
+]
+
+Example 2 - MAS Complexity Assessment:
+[
+  {
+    "name": "MAS_COMPLEXITY_JUDGE",
+    "instructions": "**Instruction**:
+Evaluate complexity and interconnectedness of the multi-agent system.
+
+**Evaluation Criteria**:
+1. *Agent Density* - Is number of agents appropriate for system scope?
+2. *Interconnection Quality* - Are agent connections well-designed and efficient?
+3. *System Scalability* - Can architecture accommodate growth and maintainability?
+
+**Scoring**:
+- \"ideal\": Complexity perfectly balanced with optimal density and connections
+- \"fair\": Complexity manageable but has scalability or efficiency issues
+- \"poor\": Complexity poorly managed with density or connection problems
+
+Return single JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "mcp_tools": []
+  }
+]
+
+Example 3 - Tool Performance Evaluation:
+[
+  {
+    "name": "TOOL_PERFORMANCE_JUDGE",
+    "instructions": "**Instruction**:
+Assess whether tools successfully fulfilled user requests by evaluating execution outcome quality.
+
+**Evaluation Criteria**:
+1. *Task Completion* - Did tool fully accomplish the request?
+2. *Accuracy* - Is output accurate, relevant, and logically consistent?
+3. *Clarity* - Is output clear, structured, and in expected format?
+4. *Failure Handling* - Any errors or unrelated information returned?
+
+**Scoring** (strict - zero tolerance for errors):
+- \"ideal\": Output perfectly solves task, all parts correct and complete
+- \"fair\": Output mostly correct but minor issues or omissions
+- \"poor\": Output fails task, incorrect, incomplete, or misleading
+
+Return JSON list: [{\"state_id\": \"...\", \"justification\": \"...\", \"score\": \"ideal|fair|poor\"}]",
+    "mcp_tools": []
+  }
+]
+
+Example 4 - Environment Setup Error Detection:
+[
+  {
+    "name": "MAS_ENVIRONMENT_SETUP_JUDGE",
+    "instructions": "**Instruction**:
+Analyze execution trace to identify environment setup and configuration errors that occurred BEFORE or DURING initialization.
+
+**Scope**: Focus on initialization phase errors, NOT runtime API errors.
+
+**Evaluation Criteria** - Look for trace entries showing:
+1. *File System Issues* - Permission denied, access errors (PermissionError, errno 13)
+2. *Credential Problems* - Missing API keys in config (KeyError: 'API_KEY')
+3. *Environment Variables* - Missing or invalid env vars (os.environ KeyError)
+4. *Config Files* - Missing or malformed configs (FileNotFoundError, JSONDecodeError)
+5. *Dependencies* - Import errors or version conflicts (ModuleNotFoundError)
+
+**Out of Scope**: HTTP status codes (401, 403, 429, 500), runtime API errors, network timeouts
+
+**Scoring**:
+- \"ideal\": No setup errors, clean initialization
+- \"fair\": Minor warnings but system recovered with defaults
+- \"poor\": Critical setup errors prevented system startup
+
+Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "mcp_tools": []
+  }
+]
+
+Example 5 - API Issues Detection:
+[
+  {
+    "name": "MAS_API_ISSUES_JUDGE",
+    "instructions": "**Instruction**:
+Analyze execution trace to identify API-related errors during RUNTIME execution.
+
+**Scope**: Focus on runtime API communication errors, NOT initialization/config errors.
+
+**Evaluation Criteria** - Look for trace entries showing:
+1. *Rate Limiting* - HTTP 429, "Rate limit exceeded" (RateLimitError)
+2. *Auth Errors* - HTTP 401/403 during API calls, "Invalid token" (AuthenticationError)
+3. *Server Errors* - HTTP 500/502/503/504, "Internal Server Error"
+4. *Not Found* - HTTP 404, "Endpoint not found"
+5. *Client Errors* - HTTP 400/422, "Bad Request", "Validation failed"
+6. *Network Failures* - Connection timeout, "Connection refused" (ConnectionError)
+
+**Out of Scope**: Environment variable errors, config file issues, local file permissions
+
+**Scoring**:
+- \"ideal\": No API errors, all external calls succeeded
+- \"fair\": Minor/temporary API errors but system recovered
+- \"poor\": Critical API errors prevented task completion or occurred repeatedly
+
+Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "mcp_tools": []
+  }
+]"""
+
 
 async def main(save_folder: str, df):
     logger.info(f"===Starting Who&When evaluation===")
     
-    pool_gen = PoolGenerator()
+    pool_gen = PoolGenerator(output_schema=output_schema, taxonomy=taxonomy, examples=examples)
     graph_gen = GraphGenerator()
     judge_client = get_langfuse_judge_client()
     logger.info("Initialized generators and Langfuse client")
@@ -41,10 +196,12 @@ async def main(save_folder: str, df):
     
     for idx in range(len(df)):
         if df.iloc[idx]["question_ID"] in done_traces:
-            logger.info(f"Task {df.iloc[idx]["question_ID"]} already processed, skipping...")
+            question_id = df.iloc[idx]["question_ID"]
+            logger.info(f"Task {question_id} already processed, skipping...")
             continue
         
-        logger.info(f"Processing task {idx + 1}/{len(df)}: {df.iloc[idx]["question_ID"]}")
+        task = df.iloc[idx]["question_ID"]
+        logger.info(f"Processing task {idx + 1}/{len(df)}: {task}")
         serializable_results = {}
         
         try:
@@ -54,8 +211,8 @@ async def main(save_folder: str, df):
             "task_id": df.iloc[idx]["question_ID"],
             "trace_id": df.iloc[idx]["question_ID"],
             }
-
-            logger.debug(f"Parsed task query: {trace_data["question"][:100]}...")
+            q = trace_data["question"][:100]
+            logger.debug(f"Parsed task query: {q}...")
             
             trace_metadata = {
                 "task_id": trace_data["task_id"],
@@ -85,12 +242,12 @@ async def main(save_folder: str, df):
             logger.info(f"Built pipeline with {len(pipeline.execution_order)} nodes")
 
             with judge_client.start_as_current_span(
-                name=f"evaluate_task_{df.iloc[idx]["question_ID"]}",
+                name=f"evaluate_task_{task}",
                 input={"task_id": df.iloc[idx]["question_ID"], "trace_id": df.iloc[idx]["question_ID"]},
                 metadata=trace_metadata,
             ) as span:
                 judge_client.update_current_trace(
-                    tags=["who_and_when_eval_30_traces", f"task_id:{df.iloc[idx]["question_ID"]}"]
+                    tags=["who_and_when_eval_30_traces", f"task_id:{task}"]
                 )
                 
                 logger.info("Executing evaluation pipeline...")
@@ -107,8 +264,11 @@ async def main(save_folder: str, df):
                             "scores": [
                                 {
                                     "item_id": "overall_score",
-                                    "score": result_dict["score"],
-                                    "justification": result_dict["justification"],
+                                    "score": result_dict,
+                                    "idx": idx,
+                                    "task_id": df.iloc[idx]["question_ID"],
+                                    "ground_truth": trace_metadata["ground_truth"],
+                                    "correct_answer": str(trace_metadata["correct_answer"])
                                 }
                             ],
                         }
@@ -169,6 +329,6 @@ if __name__ == "__main__":
     # df_algorithm = pd.read_parquet("hf://datasets/Kevin355/Who_and_When/Algorithm-Generated.parquet")
 
     asyncio.run(main(
-        save_folder="who_and_when_res_30_traces",
+        save_folder="who_and_when_gpt5_mini",
         df=df_handcrafted[:30]
     ))
