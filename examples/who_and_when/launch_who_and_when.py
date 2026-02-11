@@ -268,7 +268,10 @@ async def main(save_folder: str, df):
                                     "idx": idx,
                                     "task_id": df.iloc[idx]["question_ID"],
                                     "ground_truth": trace_metadata["ground_truth"],
-                                    "correct_answer": str(trace_metadata["correct_answer"])
+                                    "correct_answer": str(trace_metadata["correct_answer"]),
+                                    "gt_agent": df.iloc[idx]['mistake_agent'],
+                                    "gt_step": df.iloc[idx]['mistake_step'],
+                                    "gt_mistake_reason": df.iloc[idx]['mistake_reason']
                                 }
                             ],
                         }
