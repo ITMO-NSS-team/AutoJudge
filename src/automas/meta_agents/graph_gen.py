@@ -7,7 +7,7 @@ from automas.utils.logger import get_logger
 
 from .base import DEFAULT_MODEL, BaseMetaAgent
 from .prompt_registry import DEFAULT_GRAPH_INSTRUCT
-
+import os
 if TYPE_CHECKING:
     from automas.agent_pool import AgentPool
 
@@ -17,7 +17,7 @@ logger = get_logger()
 class GraphGenerator(BaseMetaAgent):
     def __init__(
         self,
-        model: str = DEFAULT_MODEL,
+        model: str = os.getenv("GRAPH_GEN_MODEL", "google/gemini-2.5-flash"),
         temperature: float = 0.3,
     ):
         super().__init__(

@@ -18,18 +18,19 @@ class AgentSchema(BaseModel):
     name: str
     instructions: str
     mcp_tools: List[str] = []
-    model: str = os.getenv("AGENT_NODE_MODEL", "openai/gpt-5-mini")
+    model: str = os.getenv("AGENT_NODE_MODEL", "openai/gpt-4.1-mini")
 
 
 class PoolGenerator(BaseMetaAgent):
     def __init__(
         self,
-        model: str = DEFAULT_MODEL,
+        model: str = os.getenv("POOL_GEN_MODEL", "google/gemini-2.5-flash"),
         temperature: float = 0.3,
         output_schema: str = "",
         taxonomy: str = "",
         examples: str = ""
     ):
+        print(f"Initializing PoolGenerator with model={model}, temperature={temperature}")
         self.schema = output_schema
         self.taxonomy = taxonomy
         self.examples = examples
