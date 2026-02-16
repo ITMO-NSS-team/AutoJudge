@@ -225,17 +225,16 @@ async def main(name: str, save_folder: str, num_traces: int | None = None):
                 done_traces.append(res_cropped)
 
     # skip failed traces
+    failed_traces_ids = []
+    new_failed_traces = []
+
     if local_results_dir.exists():
         if "failed_traces.txt" in os.listdir(local_results_dir):
-            failed_traces_ids = []
             failed_traces = []
             with open(local_results_dir / "failed_traces.txt", "r") as f:
                 for line in f:
                     if line.startswith("Task ID:"):
                         failed_traces_ids.append(line.split(":")[1].strip())
-
-    if failed_traces_ids:
-        new_failed_traces = []
 
     for idx, task in enumerate(traces_page1.data):
         if task.id in done_traces:
@@ -408,7 +407,7 @@ async def main(name: str, save_folder: str, num_traces: int | None = None):
         output_dir.mkdir(exist_ok=True)
         failed_file = output_dir / "failed_traces.txt"
 
-        if failed_traces:
+        if failed_traces_ids:
             with open(failed_file, "w") as f:
                 f.write(
                     f"Failed traces: {len(failed_traces)} out of {len(traces_page1.data)}\n"
@@ -439,7 +438,7 @@ async def main(name: str, save_folder: str, num_traces: int | None = None):
                     f"\n!  {len(new_failed_traces)} traces failed. Details saved to: {failed_file}\n"
                 )
 
-        if failed_traces:
+        if failed_traces_ids:
             logger.info(
                 f"Completed evaluation: {len(traces_page1.data) - len(failed_traces)}/{len(traces_page1.data)} successful, {len(failed_traces)} failed"
             )

@@ -334,17 +334,16 @@ async def main(save_folder: str, json_file_path: str):
                 done_traces.append(res_cropped)
 
     # skip failed traces
+    failed_traces_ids = []
+    new_failed_traces = []
+
     if local_results_dir.exists():
         if "failed_traces.txt" in os.listdir(local_results_dir):
-            failed_traces_ids = []
             failed_traces = []
             with open(local_results_dir / "failed_traces.txt", "r") as f:
                 for line in f:
                     if line.startswith("Task ID:"):
                         failed_traces_ids.append(line.split(":")[1].strip())
-
-    if failed_traces_ids:
-        new_failed_traces = []
 
     for idx in range(len(df)):
         trace_id = str(df.iloc[idx]["trace_id"])
@@ -538,7 +537,7 @@ async def main(save_folder: str, json_file_path: str):
         output_dir.mkdir(parents=True, exist_ok=True)
         failed_file = output_dir / "failed_traces.txt"
 
-        if failed_traces:
+        if failed_traces_ids:
             with open(failed_file, "w") as f:
                 f.write(f"Failed traces: {len(failed_traces)} out of {len(df)}\n")
                 f.write("=" * 80 + "\n\n")
@@ -570,7 +569,7 @@ async def main(save_folder: str, json_file_path: str):
                     f"\n!  {len(new_failed_traces)} traces failed. Details saved to: {failed_file}\n"
                 )
 
-        if failed_traces:
+        if failed_traces_ids:
             logger.info(
                 f"Completed evaluation: {len(df) - len(failed_traces)}/{len(df)} successful, {len(failed_traces)} failed"
             )
