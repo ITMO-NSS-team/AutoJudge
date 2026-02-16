@@ -1,7 +1,8 @@
 """
-This file can be used to calculate the F1 score for each LLM-metric and judge. 
-The script supports input in JSON log-format. Example is 
+This file can be used to calculate the F1 score for each LLM-metric and judge.
+The script supports input in JSON log-format. Example is
 """
+
 import json
 import os
 from pathlib import Path
@@ -323,7 +324,7 @@ if __name__ == "__main__":
         "mas_complexity",
     ]
 
-    directory_path = "/home/user/Desktop/AutoMAS/AutoJudge/examples/GAIA/results/gaia_res_30_traces_with_summarizer_as_judge_input"
+    directory_path = "/home/user/Desktop/AutoMAS/AutoJudge/examples/GAIA/results/test_new_graph_generation_3_13_02_26"
 
     for name_of_metric_high_level, name_of_metric_low_level in zip(
         system_metrics, agent_metrics
@@ -343,7 +344,9 @@ if __name__ == "__main__":
         print("METRICS FOR ", name_of_metric_low_level)
         print("=" * 50)
 
-        eval_data, eval_columns, correct, tp, fp, fn, tn = calculate_low_level_metric(df)
+        eval_data, eval_columns, correct, tp, fp, fn, tn = calculate_low_level_metric(
+            df
+        )
 
         print("Calculating correlation statistics...")
         pd.DataFrame(eval_data, columns=eval_columns).to_csv(

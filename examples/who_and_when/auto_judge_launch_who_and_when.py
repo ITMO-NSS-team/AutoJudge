@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import asyncio
@@ -8,13 +9,16 @@ from dotenv import load_dotenv
 
 load_dotenv(".env")
 
-from automas.meta_agents import GraphGenerator, PoolGenerator
+from automas.meta_agents import PoolGenerator
 from automas.pipeline import PipelineBuilder
+from automas.agent_pool import AgentPool
+from automas.pipeline.types import GraphDict
 from automas.utils.langfuse_utils import ainvoke_with_lf
 from automas.utils import get_logger
 from maseval import get_langfuse_judge_client
 import json
 import pandas as pd
+from toon_format import encode
 
 logger = get_logger(__name__)
 
@@ -172,68 +176,147 @@ Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
 ]"""
 
 
+def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
+    graph_dict = {}
+    _agents_info = agent_pool.full_agents_data
+
+    for agent in _agents_info:
+        if agent["name"] != "FINAL_AGGREGATOR":
+            graph_dict[agent["name"]] = ["FINAL_AGGREGATOR"]
+
+    graph_dict["FINAL_AGGREGATOR"] = []
+
+    return graph_dict
+
+
 async def main(save_folder: str, df):
     logger.info(f"===Starting Who&When evaluation===")
-    
-    pool_gen = PoolGenerator(output_schema=output_schema, taxonomy=taxonomy, examples=examples)
-    graph_gen = GraphGenerator()
+
+    pool_gen = PoolGenerator(
+        output_schema=output_schema, taxonomy=taxonomy, examples=examples
+    )
     judge_client = get_langfuse_judge_client()
     logger.info("Initialized generators and Langfuse client")
-    
+
     # continue processing that was already started
-    # ======================
     done_traces = []
-    local_results_dir = (Path(__file__).resolve().parent / "results" / save_folder)
+    local_results_dir = Path(__file__).resolve().parent / "results" / save_folder
     results_dir = local_results_dir
 
     if results_dir.exists():
         for res in os.listdir(results_dir):
             res_cropped = res.split(".")[0]
             done_traces.append(res_cropped)
-    # ======================
 
-    failed_traces = [] 
-    
+    # skip failed traces
+    if local_results_dir.exists():
+        if "failed_traces.txt" in os.listdir(local_results_dir):
+            failed_traces_ids = []
+            failed_traces = []
+            with open(local_results_dir / "failed_traces.txt", "r") as f:
+                for line in f:
+                    if line.startswith("Task ID:"):
+                        failed_traces_ids.append(line.split(":")[1].strip())
+
+    if failed_traces_ids:
+        new_failed_traces = []
+
     for idx in range(len(df)):
         if df.iloc[idx]["question_ID"] in done_traces:
             question_id = df.iloc[idx]["question_ID"]
             logger.info(f"Task {question_id} already processed, skipping...")
             continue
-        
+
+        if df.iloc[idx]["question_ID"] in failed_traces_ids:
+            logger.info(
+                f"Task {df.iloc[idx]["question_ID"]} already failed, skipping..."
+            )
+            continue
+
         task = df.iloc[idx]["question_ID"]
         logger.info(f"Processing task {idx + 1}/{len(df)}: {task}")
         serializable_results = {}
-        
+
         try:
             trace_data = {
-            "history": df.iloc[idx]["history"],
-            "question": df.iloc[idx]["question"],
-            "task_id": df.iloc[idx]["question_ID"],
-            "trace_id": df.iloc[idx]["question_ID"],
+                "history": df.iloc[idx]["history"],
+                "question": df.iloc[idx]["question"],
+                "task_id": df.iloc[idx]["question_ID"],
+                "trace_id": df.iloc[idx]["question_ID"],
             }
             q = trace_data["question"][:100]
             logger.debug(f"Parsed task query: {q}...")
-            
+
             trace_metadata = {
                 "task_id": trace_data["task_id"],
-                "trace_id": trace_data["trace_id"]
-                }
+                "trace_id": trace_data["trace_id"],
+            }
 
-            if 'groundtruth' in df.iloc[idx].keys():
+            if "groundtruth" in df.iloc[idx].keys():
                 trace_metadata["ground_truth"] = df.iloc[idx]["groundtruth"]
                 trace_metadata["correct_answer"] = df.iloc[idx]["is_corrected"]
             else:
                 trace_metadata["ground_truth"] = df.iloc[idx]["ground_truth"]
                 trace_metadata["correct_answer"] = df.iloc[idx]["is_correct"]
-            
-            judge_input = str({"query": trace_data["question"], "history_for_evaluating": trace_data["history"]})
-            
+
+            judge_input = encode(
+                {
+                    "query": trace_data["question"],
+                    "history_for_evaluating": trace_data["history"],
+                }
+            )
+
             logger.info("Generating judge pool...")
-            pool = await pool_gen.create_pool(judge_input)
+
+            try:
+                attempts = 0
+                while attempts < 3:
+                    pool = await pool_gen.create_pool(judge_input)
+                    agents_info = pool.full_agents_data
+                    final_agent = any(
+                        agent.get("name") == "FINAL_AGGREGATOR" for agent in agents_info
+                    )
+                    if final_agent:
+                        break
+                    attempts += 1
+
+            except Exception as e:
+                error_msg = str(e)
+                safe_error_msg = error_msg.replace("{", "{{").replace("}", "}}")
+                logger.error(
+                    f"Error processing task {df.iloc[idx]["question_ID"]}: {safe_error_msg}",
+                    exc_info=True,
+                )
+
+                if failed_traces_ids:
+                    new_failed_traces.append(
+                        {
+                            "task_id": df.iloc[idx]["question_ID"],
+                            "task_index": idx + 1,
+                            "error": error_msg,
+                            "error_type": type(e).__name__,
+                        }
+                    )
+                else:
+                    failed_traces.append(
+                        {
+                            "task_id": task.id,
+                            "task_index": idx + 1,
+                            "error": error_msg,
+                            "error_type": type(e).__name__,
+                        }
+                    )
+
+                print(
+                    f"\n!  Failed task {idx + 1}/{len(df)}: {df.iloc[idx]["question_ID"]}"
+                )
+                print(f"   Error: {error_msg}\n")
+                continue
+
             logger.info(f"Created pool with {len(pool)} judges")
-            
+
             logger.info("Generating evaluation graph...")
-            graph = await graph_gen.create_graph(pool, judge_input)
+            graph = get_parallel_graph(pool)
             logger.debug(f"Graph structure: {graph}")
 
             builder = PipelineBuilder()
@@ -243,38 +326,43 @@ async def main(save_folder: str, df):
 
             with judge_client.start_as_current_span(
                 name=f"evaluate_task_{task}",
-                input={"task_id": df.iloc[idx]["question_ID"], "trace_id": df.iloc[idx]["question_ID"]},
+                input={
+                    "task_id": df.iloc[idx]["question_ID"],
+                    "trace_id": df.iloc[idx]["question_ID"],
+                },
                 metadata=trace_metadata,
             ) as span:
                 judge_client.update_current_trace(
-                    tags=["who_and_when_eval_30_traces", f"task_id:{task}"]
+                    tags=["test", f"task_id:{df.iloc[idx]["question_ID"]}"]
                 )
-                
+
                 logger.info("Executing evaluation pipeline...")
-                result, trace_id = await ainvoke_with_lf(pool, pipeline, judge_input, graph)
+                result, trace_id = await ainvoke_with_lf(
+                    pool, pipeline, judge_input, graph
+                )
                 logger.info(f"Pipeline execution completed. Trace ID: {trace_id}")
-                
+
                 span.update(output={"result": result, "trace_id": trace_id})
                 span.end()
 
             result_dict = json.loads(result)
 
             serializable_results["summarizer_score"] = {
-                            "metric_name": "summarizer_score",
-                            "scores": [
-                                {
-                                    "item_id": "overall_score",
-                                    "score": result_dict,
-                                    "idx": idx,
-                                    "task_id": df.iloc[idx]["question_ID"],
-                                    "ground_truth": trace_metadata["ground_truth"],
-                                    "correct_answer": str(trace_metadata["correct_answer"]),
-                                    "gt_agent": df.iloc[idx]['mistake_agent'],
-                                    "gt_step": df.iloc[idx]['mistake_step'],
-                                    "gt_mistake_reason": df.iloc[idx]['mistake_reason']
-                                }
-                            ],
-                        }
+                "metric_name": "summarizer_score",
+                "scores": [
+                    {
+                        "item_id": "overall_score",
+                        "score": result_dict,
+                        "idx": idx,
+                        "task_id": df.iloc[idx]["question_ID"],
+                        "ground_truth": trace_metadata["ground_truth"],
+                        "correct_answer": str(trace_metadata["correct_answer"]),
+                        "gt_agent": df.iloc[idx]["mistake_agent"],
+                        "gt_step": df.iloc[idx]["mistake_step"],
+                        "gt_mistake_reason": df.iloc[idx]["mistake_reason"],
+                    }
+                ],
+            }
 
             output_dir = local_results_dir
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -287,51 +375,90 @@ async def main(save_folder: str, df):
 
             print(f"Result: {result}")
             print(f"Langfuse trace ID: {trace_id}")
-            
+
         except Exception as e:
             error_msg = str(e)
             safe_error_msg = error_msg.replace("{", "{{").replace("}", "}}")
             task_id = df.iloc[idx]["question_ID"]
-            logger.error(f"Error processing task {task_id}: {safe_error_msg}", exc_info=True)
-            
-            failed_traces.append({
-                "task_id": task_id,
-                "task_index": idx + 1,
-                "error": error_msg,
-                "error_type": type(e).__name__
-            })
-            
+            logger.error(
+                f"Error processing task {task_id}: {safe_error_msg}", exc_info=True
+            )
+
+            if failed_traces_ids:
+                new_failed_traces.append(
+                    {
+                        "task_id": task_id,
+                        "task_index": idx + 1,
+                        "error": error_msg,
+                        "error_type": type(e).__name__,
+                    }
+                )
+            else:
+                failed_traces.append(
+                    {
+                        "task_id": task_id,
+                        "task_index": idx + 1,
+                        "error": error_msg,
+                        "error_type": type(e).__name__,
+                    }
+                )
+
             print(f"\n!  Failed task {idx + 1}/{len(df)}: {task_id}")
             print(f"   Error: {error_msg}\n")
-            continue 
-    
-    if failed_traces:
+            continue
+
         output_dir = local_results_dir
         output_dir.mkdir(parents=True, exist_ok=True)
         failed_file = output_dir / "failed_traces.txt"
-        
-        with open(failed_file, "w") as f:
-            f.write(f"Failed traces: {len(failed_traces)} out of {len(df)}\n")
-            f.write("=" * 80 + "\n\n")
-            
-            for failed in failed_traces:
-                f.write(f"Task ID: {failed['task_id']}\n")
-                f.write(f"Index: {failed['task_index']}/{len(df)}\n")
-                f.write(f"Error Type: {failed['error_type']}\n")
-                f.write(f"Error Message: {failed['error']}\n")
-                f.write("-" * 80 + "\n\n")
-        
-        logger.warning(f"\n!  {len(failed_traces)} traces failed. Details saved to: {failed_file}\n")
-        print(f"\n!  {len(failed_traces)} traces failed. Details saved to: {failed_file}\n")
-    
-    logger.info(f"Completed evaluation: {len(df) - len(failed_traces)}/{len(df)} successful, {len(failed_traces)} failed")
+
+        if failed_traces:
+            with open(failed_file, "w") as f:
+                f.write(f"Failed traces: {len(failed_traces)} out of {len(df)}\n")
+                f.write("=" * 80 + "\n\n")
+
+                for failed in failed_traces:
+                    f.write(f"Task ID: {failed['task_id']}\n")
+                    f.write(f"Index: {failed['task_index']}/{len(df)}\n")
+                    f.write(f"Error Type: {failed['error_type']}\n")
+                    f.write(f"Error Message: {failed['error']}\n")
+                    f.write("-" * 80 + "\n\n")
+            if len(failed_traces) > 0:
+                logger.warning(
+                    f"\n!  {len(failed_traces)} traces failed. Details saved to: {failed_file}\n"
+                )
+
+        elif new_failed_traces:
+            with open(failed_file, "w") as f:
+                for failed in new_failed_traces:
+                    f.write(f"Task ID: {failed['task_id']}\n")
+                    f.write(f"Index: {failed['task_index']}/{len(df)}\n")
+                    f.write(f"Error Type: {failed['error_type']}\n")
+                    f.write(f"Error Message: {failed['error']}\n")
+                    f.write("-" * 80 + "\n\n")
+            if len(new_failed_traces) > 0:
+                logger.warning(
+                    f"\n!  {len(new_failed_traces)} traces failed. Details saved to: {failed_file}\n"
+                )
+
+        if failed_traces:
+            logger.info(
+                f"Completed evaluation: {len(df) - len(failed_traces)}/{len(df)} successful, {len(failed_traces)} failed"
+            )
+        elif new_failed_traces:
+            logger.info(
+                f"Completed evaluation: {len(df) - len(new_failed_traces)}/{len(df)} successful, {len(new_failed_traces)} failed"
+            )
 
 
 if __name__ == "__main__":
-    df_handcrafted = pd.read_parquet("hf://datasets/Kevin355/Who_and_When/Hand-Crafted.parquet")
+    df_handcrafted = pd.read_parquet(
+        "hf://datasets/Kevin355/Who_and_When/Hand-Crafted.parquet"
+    )
     # df_algorithm = pd.read_parquet("hf://datasets/Kevin355/Who_and_When/Algorithm-Generated.parquet")
 
-    asyncio.run(main(
-        save_folder="who_and_when_gpt5_mini",
-        df=df_handcrafted[:30]
-    ))
+    asyncio.run(
+        main(
+            save_folder="/home/user/Desktop/AutoMAS/AutoJudge/examples/who_and_when/results/who_and_when_res_30_traces",
+            df=df_handcrafted[:30],
+        )
+    )

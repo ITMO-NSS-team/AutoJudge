@@ -21,10 +21,21 @@ logger = get_logger(__name__)
 
 output_schema = """
 **OUTPUT FORMAT - STRICTLY REQUIRED:**
-You MUST return ONLY a valid JSON object with exactly these two fields:
+You MUST return ONLY a valid JSON object with exactly this structure:
 {
-  \"score\": \"ideal or poor\",
-  \"justification\": \"string\"
+  \"scores\": [
+    {
+      \"reliability_score\": 0-5 float,
+      \"reliability_reasoning\": \"string\",
+      \"security_score\": 0-5 float,
+      \"security_reasoning\": \"string\",
+      \"instruction_adherence_score\": 0-5 float,
+      \"instruction_adherence_reasoning\": \"string\",
+      \"plan_opt_score\": 0-5 float,
+      \"plan_opt_reasoning\": \"string\",
+      \"overall\": 0-5 float
+    }
+  ]
 }
 
 **CRITICAL RULES:**
@@ -32,16 +43,21 @@ You MUST return ONLY a valid JSON object with exactly these two fields:
 - NO markdown code fences (no ```json or ```)
 - NO explanatory text before or after the JSON
 - NO additional fields (no confidence, no metadata)
-- score must be exactly \"ideal\" or \"poor\" (lowercase)
-- justification must be a single string (concise, 1-3 sentences)
+- \"scores\" must be a list with exactly 1 object
+- Each *_score must be a number between 0 and 5 (decimals allowed, e.g. 2.5)
+- Each *_reasoning must be a single string (concise, 1-3 sentences)
+- \"overall\" MUST be the arithmetic mean of:
+  reliability_score, security_score, instruction_adherence_score, plan_opt_score
+  and rounded to 2 decimals.
 
 **VALID EXAMPLE:**
-{\"score\": \"ideal\", \"justification\": \"System demonstrates strong performance across all metrics.\"}
+{\"scores\": [{\"reliability_score\": 1.5, \"reliability_reasoning\": \"Tool usage errors reduced reliability.\", \"security_score\": 5, \"security_reasoning\": \"No security issues detected.\", \"instruction_adherence_score\": 2.5, \"instruction_adherence_reasoning\": \"Core instruction met but sub-instructions missed.\", \"plan_opt_score\": 2.5, \"plan_opt_reasoning\": \"Plan reasonable but adaptation poor.\", \"overall\": 2.88}]}
 
 **INVALID EXAMPLES:**
-- ```json{\"score\": \"ideal\"}```  ← NO markdown fences
-- Here is my assessment: {\"score\": \"ideal\"}  ← NO extra text
-- {\"score\": \"IDEAL\"}  ← must be lowercase
+- ```json{\"scores\": []}```  ← NO markdown fences
+- Here is my assessment: {\"scores\": [...]}  ← NO extra text
+- {\"score\": \"ideal\"}  ← wrong schema
+- {\"scores\": [{\"overall\": 2.88}]}  ← missing required fields
 """
 
 taxonomy = """
@@ -246,6 +262,19 @@ async def main(
 
     anno = [safe_load(f) for f in Path(anno_dir).glob("*.json")]
 
+    def extract_summary(span):
+        # Build the summary for each span
+        summary = {
+            "span_id": span.get("span_id"),
+            "span_name": span.get("span_name"),
+            "span_attributes": span.get("span_attributes", {}),
+            "child_spans": []
+        }
+        # Recurse into children if present
+        for child in span.get("child_spans", []):
+            summary["child_spans"].append(extract_summary(child))
+        return summary
+
     # continue processing that was already started
     # ======================
     done_traces = []
@@ -257,19 +286,35 @@ async def main(
             done_traces.append(res_cropped)
     # ======================
 
-    failed_traces = [] 
+    failed_traces = []
+
+    if os.path.exists(dir_to_save):
+        for file in os.listdir(dir_to_save):
+            if file.endswith(".txt"):
+                with open(os.path.join(dir_to_save, file), "r") as f:
+                    for line in f:
+                        if line.startswith("Task ID:"):
+                            failed_traces.append(line.split(":")[1].strip())
+ 
+    new_failed_traces = []
 
     # Run evaluation for each task
     for idx, task in enumerate(all_traces):
         if task["trace_id"] in done_traces:
-            logger.info(f"Task {task["trace_id"]} already processed, skipping...")
+            logger.info(f"Task {task['trace_id']} already processed, skipping...")
+            continue
+
+        if task["trace_id"] in failed_traces:
+            logger.info(f"Task {task['trace_id']} already failed, skipping...")
             continue
         
-        logger.info(f"Processing task {idx + 1}/{len(all_traces)}: {task["trace_id"]}")
+        logger.info(f"Processing task {idx + 1}/{len(all_traces)}: {task['trace_id']}")
         serializable_results = {}
 
         try:
             trace_data = task["spans"]
+            rewritten_json = [extract_summary(span) for span in trace_data]
+            trace_data = str(json.dumps(rewritten_json, indent=2))
 
             annotation = [
                 i for i in anno if i.get("trace_id", "") == task["spans"][0]["trace_id"]
@@ -309,7 +354,7 @@ async def main(
             ) as span:
                 # Update the trace with tags (tags are set at trace level, not span level)
                 judge_client.update_current_trace(
-                    tags=["trail_launch_test_30_traces", f"task_id:{task['trace_id']}"]
+                    tags=["test", f"task_id:{task['trace_id']}"] #trail_launch_test_30_traces_rewritten_json_gemini_pool_generator
                 )
                 
                 logger.info("Executing evaluation pipeline...")
@@ -321,20 +366,50 @@ async def main(
 
             result_dict = json.loads(result)
 
+            score_obj = result_dict["scores"][0]
             serializable_results["summarizer_score"] = {
-                            "metric_name": "summarizer_score",
-                            "scores": [
-                                {
-                                    "item_id": "overall_score",
-                                    "score": result_dict["score"],
-                                    "justification": result_dict["justification"],
-                                }
-                            ],
-                        }
+                "metric_name": "summarizer_score",
+                "scores": [
+                    {
+                        "item_id": "reliability",
+                        "score": score_obj["reliability_score"],
+                        "justification": score_obj["reliability_reasoning"],
+                    },
+                    {
+                        "item_id": "security",
+                        "score": score_obj["security_score"],
+                        "justification": score_obj["security_reasoning"],
+                    },
+                    {
+                        "item_id": "instruction_adherence",
+                        "score": score_obj["instruction_adherence_score"],
+                        "justification": score_obj["instruction_adherence_reasoning"],
+                    },
+                    {
+                        "item_id": "plan_opt",
+                        "score": score_obj["plan_opt_score"],
+                        "justification": score_obj["plan_opt_reasoning"],
+                    },
+                    {
+                        "item_id": "overall_score",
+                        "score": score_obj["overall"],
+                        "justification": (
+                            "Reliability: "
+                            + score_obj["reliability_reasoning"]
+                            + " Security: "
+                            + score_obj["security_reasoning"]
+                            + " Instruction adherence: "
+                            + score_obj["instruction_adherence_reasoning"]
+                            + " Plan optimization: "
+                            + score_obj["plan_opt_reasoning"]
+                        ),
+                    },
+                ],
+            }
 
             output_dir = dir_to_save
             output_dir.mkdir(parents=True, exist_ok=True)
-            output_file = output_dir / Path(f"{task["trace_id"]}.json")
+            output_file = output_dir / Path(f"{task['trace_id']}.json")
 
             with open(output_file, "w") as f:
                 json.dump(serializable_results, f, indent=2)
@@ -361,7 +436,7 @@ async def main(
             print(f"   Error: {error_msg}\n")
             continue 
     
-    if failed_traces:
+    if new_failed_traces:
         output_dir = dir_to_save
         output_dir.mkdir(parents=True, exist_ok=True)
         failed_file = output_dir / "failed_traces.txt"
@@ -370,17 +445,17 @@ async def main(
             f.write(f"Failed traces: {len(failed_traces)} out of {len(all_traces)}\n")
             f.write("=" * 80 + "\n\n")
             
-            for failed in failed_traces:
+            for failed in new_failed_traces:
                 f.write(f"Task ID: {failed['task_id']}\n")
                 f.write(f"Index: {failed['task_index']}/{len(all_traces)}\n")
                 f.write(f"Error Type: {failed['error_type']}\n")
                 f.write(f"Error Message: {failed['error']}\n")
                 f.write("-" * 80 + "\n\n")
         
-        logger.warning(f"\n!  {len(failed_traces)} traces failed. Details saved to: {failed_file}\n")
-        print(f"\n!  {len(failed_traces)} traces failed. Details saved to: {failed_file}\n")
+        logger.warning(f"\n!  {len(new_failed_traces)} traces failed. Details saved to: {failed_file}\n")
+        print(f"\n!  {len(new_failed_traces)} traces failed. Details saved to: {failed_file}\n")
     
-    logger.info(f"Completed evaluation: {len(all_traces) - len(failed_traces)}/{len(all_traces)} successful, {len(failed_traces)} failed")
+    logger.info(f"Completed evaluation: {len(all_traces) - len(new_failed_traces)}/{len(all_traces)} successful, {len(new_failed_traces)} failed")
 
 
 if __name__ == "__main__":
@@ -388,7 +463,7 @@ if __name__ == "__main__":
         main(
             trace_dir="/home/user/Desktop/AutoMAS/AutoJudge/trail-benchmark/benchmarking/data/GAIA",
             anno_dir="/home/user/Desktop/AutoMAS/AutoJudge/trail-benchmark/benchmarking/processed_annotations_gaia",
-            dir_to_save=Path(__file__).parent / "results" / "trail_30_traces",
-            num_traces=30,
+            dir_to_save=Path(__file__).parent / "results" / "trail_30_traces_rewritten_json_gemini_pool_generator",
+            num_traces=5,
         )
     )
