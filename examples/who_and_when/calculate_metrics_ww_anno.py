@@ -2,6 +2,7 @@ import os
 import json
 from pathlib import Path
 
+
 def normalize(s: str) -> str:
     return s.lower().replace(" ", "").replace("_", "")
 
@@ -14,7 +15,7 @@ def main(folder_path: str):
     step_correct = 0
     step_total = 0
 
-    for filepath in folder.rglob("*.json"): #all .json 
+    for filepath in folder.rglob("*.json"):  # all .json
         try:
             with open(filepath, encoding="utf-8") as f:
                 data = json.load(f)

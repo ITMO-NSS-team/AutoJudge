@@ -27,7 +27,7 @@ class AgentNode(UsageTrackingMixin):
 
     name: str
     instructions: str
-    model: str = os.getenv("AGENT_NODE_MODEL", "openai/gpt-5-mini")
+    model: str = os.getenv("AGENT_NODE_MODEL", "google/gemini-2.5-flash")
     api_key: Optional[str] = field(default=None, repr=False)
     mcp_tools: List[str] = field(default_factory=list)
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])

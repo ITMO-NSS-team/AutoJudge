@@ -18,7 +18,7 @@ class AgentSchema(BaseModel):
     name: str
     instructions: str
     mcp_tools: List[str] = []
-    model: str = os.getenv("AGENT_NODE_MODEL", "openai/gpt-4.1-mini")
+    model: str = os.getenv("AGENT_NODE_MODEL", "google/gemini-2.5-flash")
 
 
 class PoolGenerator(BaseMetaAgent):

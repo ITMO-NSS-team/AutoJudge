@@ -278,6 +278,9 @@ RULES:
 - Include TOOL_SELECTION_JUDGE or TOOL_PERFORMANCE_JUDGE when evaluating tool-based systems
 - Always include FINAL_AGGREGATOR as the final judge that synthesizes all findings into binary score (poor/ideal) and justification
 
+**CRITICAL: FINAL_AGGREGATOR NAME:**
+FINAL_AGGREGATOR must be named exactly "FINAL_AGGREGATOR" (case-sensitive)
+
 **CRITICAL: FINAL_AGGREGATOR OUTPUT FORMAT:**
 FINAL_AGGREGATOR must include these exact instructions at the end:
 
