@@ -25,24 +25,24 @@ taxonomy = """
 
 output_schema = """
 **OUTPUT FORMAT - STRICTLY REQUIRED:**
-You must determine the most guilty agent in the evaluated 'history_for_evaluating', based on what the other judges wrote. You MUST return ONLY a valid JSON object with exactly these two fields:
+You must determine the most guilty agent in the evaluated 'history_for_evaluating', based on what the other judges wrote. You MUST return ONLY a valid JSON object with exactly these three fields:
 {
-  \"agent\": \"Guilty Agent name from trace here",
-  \"step\": \"id (number!) of step here\",
-  \"reason\": \"reason of your prediction\",
+  "agent": "Guilty Agent name from trace here",
+  "step": "integer number (1, 2, 3...) of the message in trace sequence",
+  "reason": "reason of your prediction"
 }
+
+**STEP RULE:** This is the sequential position of the message in 'history_for_evaluating' (1 = first message, 2 = second message, etc). Use ONLY integers. Do NOT use IDs, UUIDs, strings, or any other identifiers.
 
 **VALID EXAMPLE:**
 {
-  \"agent\": \"File_Surfer\",
-  \"step\": \"1\",
-  \"reason\": \"The agent fails to collect price data for the daily tickets and season passes for California's Great America in 2024.\",
+  "agent": "File_Surfer",
+  "step": "1", 
+  "reason": "The agent fails to collect price data for the daily tickets and season passes for California's Great America in 2024."
 }
 
-**INVALID EXAMPLES:**
-- ```json{\"score\": \"ideal\"}``` 
-- Here is my assessment: {\"score\": \"ideal\"} 
-- {\"score\": \"IDEAL\"}"""
+**INVALID STEP EXAMPLES:** "step1", "abc-123", "task_id_45", "first" — ONLY USE: "1", "2", "3", etc.
+"""
 
 examples = """
 Example 1 - MAS Task Completion Evaluation:
@@ -332,6 +332,6 @@ if __name__ == "__main__":
     # df_algorithm = pd.read_parquet("hf://datasets/Kevin355/Who_and_When/Algorithm-Generated.parquet")
 
     asyncio.run(main(
-        save_folder="who_and_when_gpt5_mini",
+        save_folder="who_and_when_new_prompt",
         df=df_handcrafted[:30]
     ))
