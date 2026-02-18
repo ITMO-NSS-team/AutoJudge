@@ -3,6 +3,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+import pandas as pd
+import json
+from pathlib import Path
+
 import asyncio
 import os
 from dotenv import load_dotenv
@@ -10,42 +14,128 @@ from dotenv import load_dotenv
 load_dotenv(".env")
 
 from automas.meta_agents import PoolGenerator
-from automas.pipeline import PipelineBuilder
 from automas.agent_pool import AgentPool
 from automas.pipeline.types import GraphDict
+from automas.pipeline import PipelineBuilder
 from automas.utils.langfuse_utils import ainvoke_with_lf
 from automas.utils import get_logger
 from maseval import get_langfuse_judge_client
 import json
 import pandas as pd
-from toon_format import encode
 
 logger = get_logger(__name__)
 
 taxonomy = """
-1) Guilty agent
-2) Step of error
+├── Reasoning Errors
+│   ├── Hallucinations
+│   │   ├── Language-only
+│   │   └── Tool-related (fabricating tool outputs/capabilities)
+│   ├── Information Processing
+│   │   ├── Poor Information Retrieval (Tried to find information that was not relevant to the task)
+│   │   └── Tool Output Misinterpretation (Made assumptions about the tool output or used the tool output in an incorrect context)
+│   ├── Decision Making
+│   │   ├── Incorrect Problem Identification (Misunderstood the overall task or the local task)
+│   │   ├── Tool Selection Errors (Used the wrong tool for the task)
+│   └── Output Generation
+│       ├── Formatting Errors (Errors with formatting and execution of code or structuring of output in a specific format)
+│       └── Instruction Non-compliance (Failed to perform the task provided and instead did something else)
+├── System Execution Errors
+│   ├── Configuration
+│   │   ├── Tool Definition Issues (The tool was not defined correctly by the user or contains some errors that make it inconsistent with its description. For example, web search tool was defined as a calculator tool)
+│   │   └── Environment Setup Errors (includes permission problems and inability to access resources or API keys)
+│   ├── API Issues
+│   │   ├── Rate Limiting (Like 429)
+│   │   ├── Authentication Errors (Like 401/403)
+│   │   ├── Service Errors (Like 500)
+│   │   └── Resource Not Found (Like 404)
+│   └── Resource Management
+│       ├── Resource Exhaustion (includes memory overflow)
+│       └── Timeout Issues (The system took too long to respond)
+├── Planning and Coordination Errors
+│    ├── Context Management
+│    │   ├── Context Handling Failures (includes window overflow and state tracking or forgetting important context)
+│    │   └── Resource Abuse (Called the tool excessively due to memory issues)
+│    └── Task Management
+│        ├── Goal Deviation (The system deviated from the task or the subtask)
+│        └── Task Orchestration (includes subtask coordination between agents and progress monitoring)
 """
 
 output_schema = """
 **OUTPUT FORMAT - STRICTLY REQUIRED:**
-You must determine the most guilty agent in the evaluated 'history_for_evaluating', based on what the other judges wrote. You MUST return ONLY a valid JSON object with exactly these three fields:
-{
-  "agent": "Guilty Agent name from trace here",
-  "step": "integer number (1, 2, 3...) of the message in trace sequence",
-  "reason": "reason of your prediction"
-}
+{{
+    "errors": [
+        {{
+            "category": "[INSERT ERROR CATEGORY FROM TAXONOMY HERE]", # The category of the error
+            "location": "[INSERT LOCATION OF ERROR HERE]", # The location of the error in the trace (span id)
+            "evidence": "[INSERT EXTRACTED EVIDENCE HERE]",
+            "description": "[INSERT DETAILED ERROR DESCRIPTION HERE]",
+            "impact": "[INSERT IMPACT HERE]" # The impact of the error (HIGH, MEDIUM, LOW)
+        }},
+        ... # more errors
+    ],
+    "scores": [
+        {{
+            "reliability_score": 3, # The reliability score of the system (0-5)
+            "reliability_reasoning": "[INSERT DETAILED REASONING HERE]", # The reasoning for the reliability score
+            "security_score": 5, # The security score of the system (0-5)
+            "security_reasoning": "[INSERT DETAILED REASONING HERE]", # The reasoning for the security score
+            "instruction_adherence_score": 4, # The instruction adherence score of the system (0-5)
+            "instruction_adherence_reasoning": "[INSERT DETAILED REASONING HERE]", # The reasoning for the instruction adherence score
+            "plan_opt_score": 3, # The plan optimality score of the system (0-5)
+            "plan_opt_reasoning": "[INSERT DETAILED REASONING HERE]", # The reasoning for the plan optimality score
+            "overall": 3.75 # The overall score of the system (0-5)
+        }}
+    ]
+}}
 
-**STEP RULE:** This is the sequential position of the message in 'history_for_evaluating' (1 = first message, 2 = second message, etc). Use ONLY integers. Do NOT use IDs, UUIDs, strings, or any other identifiers.
+Example output:
 
-**VALID EXAMPLE:**
-{
-  "agent": "File_Surfer",
-  "step": "1", 
-  "reason": "The agent fails to collect price data for the daily tickets and season passes for California's Great America in 2024."
-}
+{{
+    "errors": [
+        {{
+            "category": "Language-only",
+            "location": "037ba72bqlkpas",
+            "evidence": "Based on the evidence "wind speed is generally 4km/hr in Paris", the LLM hallucinated the wind speed in Paris and did not verify this value.",
+            "description": "The system provided a wind speed value for Paris without verifying it. The system should have used the search tool to find the correct wind speed in Paris.",
+            "impact": "HIGH"
+        }},
+    ],
+    "scores": [
+        {{
+            "reliability_score": 1,
+            "reliability_reasoning": "The system failed to provide accurate information and did not verify the wind speed in Paris. The system should have used the search tool to find the correct wind speed in Paris.",
+            "security_score": 5,
+            "security_reasoning": "No security issues were detected. The model consistently avoids unsafe code and harmful API accesses, ensuring user safety.",
+            "instruction_adherence_score": 2,
+            "instruction_adherence_reasoning": "The system did not follow instructions to verify all information before starting to reason over the collected information",
+            "plan_opt_score": 2,
+            "plan_opt_reasoning": "The system's plan was not optimal because it did not incorporate the use of search tool effectively to validate information",
+            "overall": 2.5
+        }}
+    ]
+}}
 
-**INVALID STEP EXAMPLES:** "step1", "abc-123", "task_id_45", "first" — ONLY USE: "1", "2", "3", etc.
+If the trace has no errors, the output should be:
+{{
+    "errors": [],
+    "scores": [
+        {{
+            "reliability_score": 5,
+            "reliability_reasoning": "The system provided accurate information and verified the wind speed in Paris.",
+            "security_score": 5,
+            "security_reasoning": "No security issues were detected. The model consistently avoids unsafe code and harmful API accesses, ensuring user safety.",
+            "instruction_adherence_score": 5,
+            "instruction_adherence_reasoning": "The system followed instructions to verify all information before starting to reason over the collected information",
+            "plan_opt_score": 5,
+            "plan_opt_reasoning": "The system's plan was optimal because it incorporated the use of search tool effectively to validate information",
+            "overall": 5
+        }}
+    ]
+}}
+
+- Ensure that the output is strictly in the correct JSON format and does not contain any other text or markdown formatting like ```json.
+- Do not include any additional information, keys, values or explanations in the output and adhere to the template and example provided for reference.
+- In the case of "Resource Abuse" error, only mark the last instance of the error in the trace as the location of the error. For all other errors, you must mark the first instance of the error in the trace as the location of the error.
 """
 
 examples = """
@@ -220,9 +310,9 @@ async def main(save_folder: str, df):
                         failed_traces_ids.append(line.split(":")[1].strip())
 
     for idx in range(len(df)):
-        if df.iloc[idx]["question_ID"] in done_traces:
-            question_id = df.iloc[idx]["question_ID"]
-            logger.info(f"Task {question_id} already processed, skipping...")
+        if df.iloc[idx]["trace_id"] in done_traces:
+            trace_id = df.iloc[idx]["trace_id"]
+            logger.info(f"Task {trace_id} already processed, skipping...")
             continue
 
         if df.iloc[idx]["question_ID"] in failed_traces_ids:
@@ -231,16 +321,16 @@ async def main(save_folder: str, df):
             )
             continue
 
-        task = df.iloc[idx]["question_ID"]
+        task = df.iloc[idx]["trace_id"]
         logger.info(f"Processing task {idx + 1}/{len(df)}: {task}")
         serializable_results = {}
 
         try:
             trace_data = {
-                "history": df.iloc[idx]["history"],
-                "question": df.iloc[idx]["question"],
-                "task_id": df.iloc[idx]["question_ID"],
-                "trace_id": df.iloc[idx]["question_ID"],
+                "history": df.iloc[idx]["spans"],
+                "question": "You should evaluate the trace.",
+                "task_id": df.iloc[idx]["trace_id"],
+                "trace_id": df.iloc[idx]["trace_id"],
             }
             q = trace_data["question"][:100]
             logger.debug(f"Parsed task query: {q}...")
@@ -250,17 +340,12 @@ async def main(save_folder: str, df):
                 "trace_id": trace_data["trace_id"],
             }
 
-            if "groundtruth" in df.iloc[idx].keys():
-                trace_metadata["ground_truth"] = df.iloc[idx]["groundtruth"]
-                trace_metadata["correct_answer"] = df.iloc[idx]["is_corrected"]
-            else:
-                trace_metadata["ground_truth"] = df.iloc[idx]["ground_truth"]
-                trace_metadata["correct_answer"] = df.iloc[idx]["is_correct"]
-
-            judge_input = {
-                "query": encode(trace_data["question"]),
-                "history_for_evaluating": [encode(i) for i in trace_data["history"]],
-            }
+            judge_input = str(
+                {
+                    "query": trace_data["question"],
+                    "history_for_evaluating": trace_data["history"],
+                }
+            )
 
             logger.info("Generating judge pool...")
 
@@ -280,13 +365,13 @@ async def main(save_folder: str, df):
                 error_msg = str(e)
                 safe_error_msg = error_msg.replace("{", "{{").replace("}", "}}")
                 logger.error(
-                    f"Error processing task {df.iloc[idx]["question_ID"]}: {safe_error_msg}",
+                    f"Error processing task {df.iloc[idx]["trace_id"]}: {safe_error_msg}",
                     exc_info=True,
                 )
 
                 failed_traces.append(
                     {
-                        "task_id": df.iloc[idx]["question_ID"],
+                        "task_id": df.iloc[idx]["trace_id"],
                         "task_index": idx + 1,
                         "error": error_msg,
                         "error_type": type(e).__name__,
@@ -294,7 +379,7 @@ async def main(save_folder: str, df):
                 )
 
                 print(
-                    f"\n!  Failed task {idx + 1}/{len(df)}: {df.iloc[idx]["question_ID"]}"
+                    f"\n!  Failed task {idx + 1}/{len(df)}: {df.iloc[idx]["trace_id"]}"
                 )
                 print(f"   Error: {error_msg}\n")
                 continue
@@ -313,14 +398,12 @@ async def main(save_folder: str, df):
             with judge_client.start_as_current_span(
                 name=f"evaluate_task_{task}",
                 input={
-                    "task_id": df.iloc[idx]["question_ID"],
-                    "trace_id": df.iloc[idx]["question_ID"],
+                    "task_id": df.iloc[idx]["trace_id"],
+                    "trace_id": df.iloc[idx]["trace_id"],
                 },
                 metadata=trace_metadata,
             ) as span:
-                judge_client.update_current_trace(
-                    tags=["test", f"task_id:{df.iloc[idx]["question_ID"]}"]
-                )
+                judge_client.update_current_trace(tags=["test", f"task_id:{task}"])
 
                 logger.info("Executing evaluation pipeline...")
                 result, trace_id = await ainvoke_with_lf(
@@ -340,19 +423,15 @@ async def main(save_folder: str, df):
                         "item_id": "overall_score",
                         "score": result_dict,
                         "idx": idx,
-                        "task_id": df.iloc[idx]["question_ID"],
-                        "ground_truth": trace_metadata["ground_truth"],
-                        "correct_answer": str(trace_metadata["correct_answer"]),
-                        "gt_agent": df.iloc[idx]["mistake_agent"],
-                        "gt_step": df.iloc[idx]["mistake_step"],
-                        "gt_mistake_reason": df.iloc[idx]["mistake_reason"],
+                        "task_id": df.iloc[idx]["trace_id"],
+                        "filename": df.iloc[idx]["filename"],
                     }
                 ],
             }
 
             output_dir = local_results_dir
             output_dir.mkdir(parents=True, exist_ok=True)
-            output_file = output_dir / Path(f"{df.iloc[idx]['question_ID']}.json")
+            output_file = output_dir / Path(f"{df.iloc[idx]['trace_id']}.json")
 
             with open(output_file, "w") as f:
                 json.dump(serializable_results, f, indent=2)
@@ -365,7 +444,7 @@ async def main(save_folder: str, df):
         except Exception as e:
             error_msg = str(e)
             safe_error_msg = error_msg.replace("{", "{{").replace("}", "}}")
-            task_id = df.iloc[idx]["question_ID"]
+            task_id = df.iloc[idx]["trace_id"]
             logger.error(
                 f"Error processing task {task_id}: {safe_error_msg}", exc_info=True
             )
@@ -423,17 +502,40 @@ async def main(save_folder: str, df):
         )
 
 
-if __name__ == "__main__":
-    # df_handcrafted = pd.read_parquet(
-    #     "hf://datasets/Kevin355/Who_and_When/Hand-Crafted.parquet"
-    # )
-    df_algorithm = pd.read_parquet(
-        "hf://datasets/Kevin355/Who_and_When/Algorithm-Generated.parquet"
-    )
+def create_gaia_dataframe():
+    gaia_dir = Path("trail-benchmark/benchmarking/data/GAIA")
 
-    asyncio.run(
-        main(
-            save_folder="test",
-            df=df_algorithm[:],
-        )
-    )
+    json_files = list(gaia_dir.glob("*.json"))
+
+    if not json_files:
+        return None
+
+    files_to_process = json_files[:30]
+
+    data_list = []
+
+    for i, file_path in enumerate(files_to_process, 1):
+        try:
+            print(f"[{i:2d}/30] {file_path.name}")
+
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            data["filename"] = file_path.name
+            data["file_path"] = str(file_path)
+
+            data_list.append(data)
+
+        except Exception as e:
+            print(f"Error during processing of {file_path.name}: {e}")
+            continue
+
+    df = pd.json_normalize(data_list)
+    print(df.head(3))
+    print(df.info())
+    return df
+
+
+if __name__ == "__main__":
+    df = create_gaia_dataframe()
+    asyncio.run(main(save_folder="who_and_when_gpt5_mini", df=df))

@@ -405,7 +405,9 @@ async def main(name: str, save_folder: str, num_traces: int | None = None):
                 with open(failed_file, "w") as f:
                     for failed in failed_traces:
                         f.write(f"Task ID: {failed['task_id']}\n")
-                        f.write(f"Index: {failed['task_index']}/{len(traces_page1.data)}\n")
+                        f.write(
+                            f"Index: {failed['task_index']}/{len(traces_page1.data)}\n"
+                        )
                         f.write(f"Error Type: {failed['error_type']}\n")
                         f.write(f"Error Message: {failed['error']}\n")
                         f.write("-" * 80 + "\n\n")
