@@ -335,11 +335,10 @@ async def main(save_folder: str, json_file_path: str):
 
     # skip failed traces
     failed_traces_ids = []
-    new_failed_traces = []
+    failed_traces = []
 
     if local_results_dir.exists():
         if "failed_traces.txt" in os.listdir(local_results_dir):
-            failed_traces = []
             with open(local_results_dir / "failed_traces.txt", "r") as f:
                 for line in f:
                     if line.startswith("Task ID:"):
@@ -414,24 +413,14 @@ async def main(save_folder: str, json_file_path: str):
                     f"Error processing task {trace_id}: {safe_error_msg}", exc_info=True
                 )
 
-                if failed_traces_ids:
-                    new_failed_traces.append(
-                        {
-                            "task_id": trace_id,
-                            "task_index": idx + 1,
-                            "error": error_msg,
-                            "error_type": type(e).__name__,
-                        }
-                    )
-                else:
-                    failed_traces.append(
-                        {
-                            "task_id": trace_id,
-                            "task_index": idx + 1,
-                            "error": error_msg,
-                            "error_type": type(e).__name__,
-                        }
-                    )
+                failed_traces.append(
+                    {
+                        "task_id": trace_id,
+                        "task_index": idx + 1,
+                        "error": error_msg,
+                        "error_type": type(e).__name__,
+                    }
+                )
 
                 print(f"\n!  Failed task {idx + 1}/{len(df)}: {trace_id}")
                 print(f"   Error: {error_msg}\n")
@@ -454,7 +443,7 @@ async def main(save_folder: str, json_file_path: str):
             ) as span:
                 judge_client.update_current_trace(
                     tags=[
-                        "mast_dataset_eval",
+                        "test",
                         f"trace_id:{trace_id}",
                         f"mas:{mas_name}",
                     ]
@@ -508,26 +497,15 @@ async def main(save_folder: str, json_file_path: str):
                 f"Error processing task {trace_id}: {safe_error_msg}", exc_info=True
             )
 
-            if failed_traces_ids:
-                new_failed_traces.append(
-                    {
-                        "task_id": trace_id,
-                        "task_index": idx + 1,
-                        "mas_name": df.iloc[idx].get("mas_name", "unknown"),
-                        "error": error_msg,
-                        "error_type": type(e).__name__,
-                    }
-                )
-            else:
-                failed_traces.append(
-                    {
-                        "task_id": trace_id,
-                        "task_index": idx + 1,
-                        "mas_name": df.iloc[idx].get("mas_name", "unknown"),
-                        "error": error_msg,
-                        "error_type": type(e).__name__,
-                    }
-                )
+            failed_traces.append(
+                {
+                    "task_id": trace_id,
+                    "task_index": idx + 1,
+                    "mas_name": df.iloc[idx].get("mas_name", "unknown"),
+                    "error": error_msg,
+                    "error_type": type(e).__name__,
+                }
+            )
 
             print(f"\n!  Failed task {idx + 1}/{len(df)}: {trace_id}")
             print(f"   Error: {error_msg}\n")
@@ -550,32 +528,29 @@ async def main(save_folder: str, json_file_path: str):
                     f.write(f"Error Message: {failed['error']}\n")
                     f.write("-" * 80 + "\n\n")
 
-            if len(failed_traces) > 0:
-                logger.warning(
-                    f"\n!  {len(failed_traces)} traces failed. Details saved to: {failed_file}\n"
-                )
+        else:
+            if failed_traces:
+                with open(failed_file, "w") as f:
+                    for failed in failed_traces:
+                        f.write(f"Task ID: {failed['task_id']}\n")
+                        f.write(f"MAS: {failed.get('mas_name', 'unknown')}\n")
+                        f.write(f"Index: {failed['task_index']}/{len(df)}\n")
+                        f.write(f"Error Type: {failed['error_type']}\n")
+                        f.write(f"Error Message: {failed['error']}\n")
+                        f.write("-" * 80 + "\n\n")
 
-        elif new_failed_traces:
-            with open(failed_file, "w") as f:
-                for failed in new_failed_traces:
-                    f.write(f"Task ID: {failed['task_id']}\n")
-                    f.write(f"MAS: {failed.get('mas_name', 'unknown')}\n")
-                    f.write(f"Index: {failed['task_index']}/{len(df)}\n")
-                    f.write(f"Error Type: {failed['error_type']}\n")
-                    f.write(f"Error Message: {failed['error']}\n")
-                    f.write("-" * 80 + "\n\n")
-            if len(new_failed_traces) > 0:
-                logger.warning(
-                    f"\n!  {len(new_failed_traces)} traces failed. Details saved to: {failed_file}\n"
-                )
+        if len(failed_traces) > 0:
+            logger.warning(
+                f"\n!  {len(failed_traces)} traces failed. Details saved to: {failed_file}\n"
+            )
 
         if failed_traces_ids:
             logger.info(
-                f"Completed evaluation: {len(df) - len(failed_traces)}/{len(df)} successful, {len(failed_traces)} failed"
+                f"Completed evaluation: {len(df) - (len(failed_traces) + len(failed_traces_ids))}/{len(df)} successful, {len(failed_traces) + len(failed_traces_ids)} failed"
             )
-        elif new_failed_traces:
+        else:
             logger.info(
-                f"Completed evaluation: {len(df) - len(new_failed_traces)}/{len(df)} successful, {len(new_failed_traces)} failed"
+                f"Completed evaluation: {len(df) - len(failed_traces)}/{len(df)} successful, {len(failed_traces)} failed"
             )
 
 

@@ -226,11 +226,10 @@ async def main(name: str, save_folder: str, num_traces: int | None = None):
 
     # skip failed traces
     failed_traces_ids = []
-    new_failed_traces = []
+    failed_traces = []
 
     if local_results_dir.exists():
         if "failed_traces.txt" in os.listdir(local_results_dir):
-            failed_traces = []
             with open(local_results_dir / "failed_traces.txt", "r") as f:
                 for line in f:
                     if line.startswith("Task ID:"):
@@ -297,24 +296,14 @@ async def main(name: str, save_folder: str, num_traces: int | None = None):
                     f"Error processing task {task.id}: {safe_error_msg}", exc_info=True
                 )
 
-                if failed_traces_ids:
-                    new_failed_traces.append(
-                        {
-                            "task_id": task.id,
-                            "task_index": idx + 1,
-                            "error": error_msg,
-                            "error_type": type(e).__name__,
-                        }
-                    )
-                else:
-                    failed_traces.append(
-                        {
-                            "task_id": task.id,
-                            "task_index": idx + 1,
-                            "error": error_msg,
-                            "error_type": type(e).__name__,
-                        }
-                    )
+                failed_traces.append(
+                    {
+                        "task_id": task.id,
+                        "task_index": idx + 1,
+                        "error": error_msg,
+                        "error_type": type(e).__name__,
+                    }
+                )
 
                 print(f"\n!  Failed task {idx + 1}/{len(traces_page1.data)}: {task.id}")
                 print(f"   Error: {error_msg}\n")
@@ -380,24 +369,14 @@ async def main(name: str, save_folder: str, num_traces: int | None = None):
                 f"Error processing task {task.id}: {safe_error_msg}", exc_info=True
             )
 
-            if failed_traces_ids:
-                new_failed_traces.append(
-                    {
-                        "task_id": task.id,
-                        "task_index": idx + 1,
-                        "error": error_msg,
-                        "error_type": type(e).__name__,
-                    }
-                )
-            else:
-                failed_traces.append(
-                    {
-                        "task_id": task.id,
-                        "task_index": idx + 1,
-                        "error": error_msg,
-                        "error_type": type(e).__name__,
-                    }
-                )
+            failed_traces.append(
+                {
+                    "task_id": task.id,
+                    "task_index": idx + 1,
+                    "error": error_msg,
+                    "error_type": type(e).__name__,
+                }
+            )
 
             print(f"\n!  Failed task {idx + 1}/{len(traces_page1.data)}: {task.id}")
             print(f"   Error: {error_msg}\n")
@@ -420,31 +399,29 @@ async def main(name: str, save_folder: str, num_traces: int | None = None):
                     f.write(f"Error Type: {failed['error_type']}\n")
                     f.write(f"Error Message: {failed['error']}\n")
                     f.write("-" * 80 + "\n\n")
-            if len(failed_traces) > 0:
-                logger.warning(
-                    f"\n!  {len(failed_traces)} traces failed. Details saved to: {failed_file}\n"
-                )
 
-        elif new_failed_traces:
-            with open(failed_file, "w") as f:
-                for failed in new_failed_traces:
-                    f.write(f"Task ID: {failed['task_id']}\n")
-                    f.write(f"Index: {failed['task_index']}/{len(traces_page1.data)}\n")
-                    f.write(f"Error Type: {failed['error_type']}\n")
-                    f.write(f"Error Message: {failed['error']}\n")
-                    f.write("-" * 80 + "\n\n")
-            if len(new_failed_traces) > 0:
-                logger.warning(
-                    f"\n!  {len(new_failed_traces)} traces failed. Details saved to: {failed_file}\n"
-                )
+        else:
+            if failed_traces:
+                with open(failed_file, "w") as f:
+                    for failed in failed_traces:
+                        f.write(f"Task ID: {failed['task_id']}\n")
+                        f.write(f"Index: {failed['task_index']}/{len(traces_page1.data)}\n")
+                        f.write(f"Error Type: {failed['error_type']}\n")
+                        f.write(f"Error Message: {failed['error']}\n")
+                        f.write("-" * 80 + "\n\n")
+
+        if len(failed_traces) > 0:
+            logger.warning(
+                f"\n!  {len(failed_traces)} traces failed. Details saved to: {failed_file}\n"
+            )
 
         if failed_traces_ids:
             logger.info(
-                f"Completed evaluation: {len(traces_page1.data) - len(failed_traces)}/{len(traces_page1.data)} successful, {len(failed_traces)} failed"
+                f"Completed evaluation: {len(traces_page1.data) - (len(failed_traces) + len(failed_traces_ids))}/{len(traces_page1.data)} successful, {len(failed_traces) + len(failed_traces_ids)} failed"
             )
-        elif new_failed_traces:
+        else:
             logger.info(
-                f"Completed evaluation: {len(traces_page1.data) - len(new_failed_traces)}/{len(traces_page1.data)} successful, {len(new_failed_traces)} failed"
+                f"Completed evaluation: {len(traces_page1.data) - len(failed_traces)}/{len(traces_page1.data)} successful, {len(failed_traces)} failed"
             )
 
 
