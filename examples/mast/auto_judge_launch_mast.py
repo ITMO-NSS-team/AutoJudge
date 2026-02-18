@@ -529,14 +529,15 @@ async def main(save_folder: str, json_file_path: str):
                     f.write("-" * 80 + "\n\n")
 
         else:
-            with open(failed_file, "w") as f:
-                for failed in failed_traces:
-                    f.write(f"Task ID: {failed['task_id']}\n")
-                    f.write(f"MAS: {failed.get('mas_name', 'unknown')}\n")
-                    f.write(f"Index: {failed['task_index']}/{len(df)}\n")
-                    f.write(f"Error Type: {failed['error_type']}\n")
-                    f.write(f"Error Message: {failed['error']}\n")
-                    f.write("-" * 80 + "\n\n")
+            if failed_traces:
+                with open(failed_file, "w") as f:
+                    for failed in failed_traces:
+                        f.write(f"Task ID: {failed['task_id']}\n")
+                        f.write(f"MAS: {failed.get('mas_name', 'unknown')}\n")
+                        f.write(f"Index: {failed['task_index']}/{len(df)}\n")
+                        f.write(f"Error Type: {failed['error_type']}\n")
+                        f.write(f"Error Message: {failed['error']}\n")
+                        f.write("-" * 80 + "\n\n")
 
         if len(failed_traces) > 0:
             logger.warning(
