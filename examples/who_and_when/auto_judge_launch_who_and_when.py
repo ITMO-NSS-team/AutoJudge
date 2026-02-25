@@ -18,7 +18,6 @@ from automas.utils import get_logger
 from maseval import get_langfuse_judge_client
 import json
 import pandas as pd
-from toon_format import encode
 
 logger = get_logger(__name__)
 
@@ -38,14 +37,28 @@ You must determine the most guilty agent in the evaluated 'history_for_evaluatin
 
 **STEP RULE:** This is the sequential position of the message in 'history_for_evaluating' (1 = first message, 2 = second message, etc). Use ONLY integers. Do NOT use IDs, UUIDs, strings, or any other identifiers.
 
+**CRITICAL RULES:**
+- Return ONLY the JSON object, nothing else
+- NO markdown code fences (no ```json or ```)
+- NO explanatory text before or after the JSON
+- NO additional fields (no score, no confidence, no metadata)
+- agent must be the exact agent name as it appears in the trace
+- step must be a plain integer string: "1", "2", "3", etc.
+
 **VALID EXAMPLE:**
 {
   "agent": "File_Surfer",
-  "step": "1", 
+  "step": "1",
   "reason": "The agent fails to collect price data for the daily tickets and season passes for California's Great America in 2024."
 }
 
-**INVALID STEP EXAMPLES:** "step1", "abc-123", "task_id_45", "first" — ONLY USE: "1", "2", "3", etc.
+**INVALID EXAMPLES:**
+- ```json{"agent": "File_Surfer", "step": "1", "reason": "..."}```  ← NO markdown fences
+- Here is the guilty agent: {"agent": "File_Surfer", ...}  ← NO extra text before JSON
+- {"agent": "File_Surfer", "step": "step1", "reason": "..."}  ← step must be integer, not "step1"
+- {"agent": "File_Surfer", "step": "task_id_45", "reason": "..."}  ← NO UUIDs or task IDs as step
+- {"agent": "File_Surfer", "step": 1, "reason": "..."}  ← step must be a string integer "1", not bare 1
+- {"agent": "file_surfer", "step": "1", "reason": "..."}  ← agent name must match trace exactly
 """
 
 examples = """
@@ -173,6 +186,28 @@ Analyze execution trace to identify API-related errors during RUNTIME execution.
 Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
     "mcp_tools": []
   }
+]
+
+Example 6 - Tool Selection Evaluation:
+[
+  {
+    "name": "TOOL_SELECTION_JUDGE",
+    "instructions": "**Instruction**:
+Assess whether tool selections made by the agent are appropriate for the task.
+
+**Evaluation Criteria**:
+1. *Tool Relevance* - Does the selected tool directly address the node_role responsibility?
+2. *Pipeline Position* - Is the tool suitable given the agent's position in the pipeline?
+3. *Justification* - Is the tool selection clearly supported by the task requirements?
+
+**Scoring**:
+- \"ideal\": Tool selection perfectly matches node_role and is clearly justified
+- \"fair\": Selection is relevant but potentially suboptimal for the task
+- \"poor\": Selection is inappropriate or clearly mismatched to node_role
+
+Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "mcp_tools": []
+  }
 ]"""
 
 
@@ -258,8 +293,8 @@ async def main(save_folder: str, df):
                 trace_metadata["correct_answer"] = df.iloc[idx]["is_correct"]
 
             judge_input = {
-                "query": encode(trace_data["question"]),
-                "history_for_evaluating": [encode(i) for i in trace_data["history"]],
+                "query": json.dumps(trace_data["question"], ensure_ascii=False),
+                "history_for_evaluating": [json.dumps(i, ensure_ascii=False) for i in trace_data["history"]],
             }
 
             logger.info("Generating judge pool...")
@@ -306,9 +341,10 @@ async def main(save_folder: str, df):
             logger.debug(f"Graph structure: {graph}")
 
             builder = PipelineBuilder()
-            pipeline = builder.create_from_pool(pool, graph).build()
-            pipeline.to_mermaid_lr(visualize=True)
-            logger.info(f"Built pipeline with {len(pipeline.execution_order)} nodes")
+            # Build once for visualization, loop will rebuild fresh for each execution attempt
+            _pipeline_for_viz = builder.create_from_pool(pool, graph).build()
+            _pipeline_for_viz.to_mermaid_lr(visualize=True)
+            logger.info(f"Built pipeline with {len(_pipeline_for_viz.execution_order)} nodes")
 
             with judge_client.start_as_current_span(
                 name=f"evaluate_task_{task}",
@@ -322,16 +358,38 @@ async def main(save_folder: str, df):
                     tags=["test", f"task_id:{df.iloc[idx]["question_ID"]}"]
                 )
 
-                logger.info("Executing evaluation pipeline...")
-                result, trace_id = await ainvoke_with_lf(
-                    pool, pipeline, judge_input, graph
-                )
-                logger.info(f"Pipeline execution completed. Trace ID: {trace_id}")
+                result, trace_id = None, None
+                for pipeline_attempt in range(1, 4):
+                    logger.info(f"Executing evaluation pipeline (attempt {pipeline_attempt}/3)...")
+                    # Rebuild pipeline each attempt to get a fresh node_session
+                    pipeline = builder.create_from_pool(pool, graph).build()
+                    result, trace_id = await ainvoke_with_lf(
+                        pool, pipeline, judge_input, graph
+                    )
+                    logger.info(f"Pipeline execution completed. Trace ID: {trace_id}. Raw result: {repr(result)}")
+                    if result and result.strip():
+                        break
+                    logger.warning(f"Pipeline returned empty result on attempt {pipeline_attempt}, retrying...")
 
                 span.update(output={"result": result, "trace_id": trace_id})
                 span.end()
 
-            result_dict = json.loads(result)
+            if not result or not result.strip():
+                raise ValueError(f"Pipeline returned empty result after 3 attempts (trace_id={trace_id})")
+
+            # Strip markdown code fences if the LLM wrapped the JSON (e.g. ```json ... ```)
+            result_clean = result.strip()
+            if result_clean.startswith("```"):
+                lines = result_clean.splitlines()
+                # drop first line (```json or ```) and last line (```)
+                result_clean = "\n".join(lines[1:-1]).strip()
+
+            try:
+                result_dict = json.loads(result_clean)
+            except json.JSONDecodeError:
+                # Last resort: save raw result as-is so nothing is lost
+                logger.warning(f"Could not parse result as JSON, saving raw string. Result: {repr(result_clean)}")
+                result_dict = {"raw": result_clean}
 
             serializable_results["summarizer_score"] = {
                 "metric_name": "summarizer_score",
@@ -433,7 +491,7 @@ if __name__ == "__main__":
 
     asyncio.run(
         main(
-            save_folder="test",
+            save_folder="algo1",
             df=df_algorithm[:],
         )
     )
