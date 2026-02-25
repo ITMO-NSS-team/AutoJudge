@@ -63,13 +63,15 @@ Evaluate whether the multi-agent system fully completed the user's task by asses
 4. *Actionability* - Can the user act on outputs to achieve their goal?
 5. *Efficiency* - Were tasks completed without unnecessary duplication?
 
+You must use the available tools at least once!
+
 **Scoring**:
 - \"ideal\": Task fully achieved, all subtasks addressed, outputs consistent and actionable
 - \"fair\": Task largely achieved but minor omissions or slight inconsistencies
 - \"poor\": Task failed, critical steps missing, inconsistent or unusable outputs
 
 Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": []
+    "mcp_tools": [get_content_tool]
   }
 ]
 
@@ -85,13 +87,15 @@ Evaluate complexity and interconnectedness of the multi-agent system.
 2. *Interconnection Quality* - Are agent connections well-designed and efficient?
 3. *System Scalability* - Can architecture accommodate growth and maintainability?
 
+You must use the available tools at least once!
+
 **Scoring**:
 - \"ideal\": Complexity perfectly balanced with optimal density and connections
 - \"fair\": Complexity manageable but has scalability or efficiency issues
 - \"poor\": Complexity poorly managed with density or connection problems
 
 Return single JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": []
+    "mcp_tools": [get_content_tool]
   }
 ]
 
@@ -108,13 +112,15 @@ Assess whether tools successfully fulfilled user requests by evaluating executio
 3. *Clarity* - Is output clear, structured, and in expected format?
 4. *Failure Handling* - Any errors or unrelated information returned?
 
+You must use the available tools at least once!
+
 **Scoring** (strict - zero tolerance for errors):
 - \"ideal\": Output perfectly solves task, all parts correct and complete
 - \"fair\": Output mostly correct but minor issues or omissions
 - \"poor\": Output fails task, incorrect, incomplete, or misleading
 
 Return JSON list: [{\"state_id\": \"...\", \"justification\": \"...\", \"score\": \"ideal|fair|poor\"}]",
-    "mcp_tools": []
+    "mcp_tools": [get_content_tool]
   }
 ]
 
@@ -134,6 +140,8 @@ Analyze execution trace to identify environment setup and configuration errors t
 4. *Config Files* - Missing or malformed configs (FileNotFoundError, JSONDecodeError)
 5. *Dependencies* - Import errors or version conflicts (ModuleNotFoundError)
 
+You must use the available tools at least once!
+
 **Out of Scope**: HTTP status codes (401, 403, 429, 500), runtime API errors, network timeouts
 
 **Scoring**:
@@ -142,7 +150,7 @@ Analyze execution trace to identify environment setup and configuration errors t
 - \"poor\": Critical setup errors prevented system startup
 
 Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": []
+    "mcp_tools": [get_content_tool]
   }
 ]
 
@@ -154,6 +162,8 @@ Example 5 - API Issues Detection:
 Analyze execution trace to identify API-related errors during RUNTIME execution.
 
 **Scope**: Focus on runtime API communication errors, NOT initialization/config errors.
+
+You must use the available tools at least once!
 
 **Evaluation Criteria** - Look for trace entries showing:
 1. *Rate Limiting* - HTTP 429, "Rate limit exceeded" (RateLimitError)
@@ -171,7 +181,7 @@ Analyze execution trace to identify API-related errors during RUNTIME execution.
 - \"poor\": Critical API errors prevented task completion or occurred repeatedly
 
 Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": []
+    "mcp_tools": [get_content_tool]
   }
 ]"""
 
@@ -189,7 +199,7 @@ def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
     return graph_dict
 
 
-async def main(save_folder: str, df):
+async def main(save_folder: str, df, df_summary):
     logger.info(f"===Starting Who&When evaluation===")
 
     pool_gen = PoolGenerator(
@@ -220,18 +230,19 @@ async def main(save_folder: str, df):
                         failed_traces_ids.append(line.split(":")[1].strip())
 
     for idx in range(len(df)):
-        if df.iloc[idx]["question_ID"] in done_traces:
-            question_id = df.iloc[idx]["question_ID"]
+        id = df.iloc[idx]["question_ID"] 
+        if id in done_traces:
+            question_id = id
             logger.info(f"Task {question_id} already processed, skipping...")
             continue
 
-        if df.iloc[idx]["question_ID"] in failed_traces_ids:
+        if id in failed_traces_ids:
             logger.info(
-                f"Task {df.iloc[idx]["question_ID"]} already failed, skipping..."
+                f"Task {id} already failed, skipping..."
             )
             continue
 
-        task = df.iloc[idx]["question_ID"]
+        task = id
         logger.info(f"Processing task {idx + 1}/{len(df)}: {task}")
         serializable_results = {}
 
@@ -239,10 +250,10 @@ async def main(save_folder: str, df):
             trace_data = {
                 "history": df.iloc[idx]["history"],
                 "question": df.iloc[idx]["question"],
-                "task_id": df.iloc[idx]["question_ID"],
-                "trace_id": df.iloc[idx]["question_ID"],
+                "task_id": id,
+                "trace_id": id,
             }
-            q = trace_data["question"][:100]
+            q = df_summary[df_summary["question_ID"] == id]["summary"].values[0]
             logger.debug(f"Parsed task query: {q}...")
 
             trace_metadata = {
@@ -259,7 +270,7 @@ async def main(save_folder: str, df):
 
             judge_input = {
                 "query": encode(trace_data["question"]),
-                "history_for_evaluating": [encode(i) for i in trace_data["history"]],
+                "history_for_evaluating": str(q),
             }
 
             logger.info("Generating judge pool...")
@@ -280,13 +291,13 @@ async def main(save_folder: str, df):
                 error_msg = str(e)
                 safe_error_msg = error_msg.replace("{", "{{").replace("}", "}}")
                 logger.error(
-                    f"Error processing task {df.iloc[idx]["question_ID"]}: {safe_error_msg}",
+                    f"Error processing task {id}: {safe_error_msg}",
                     exc_info=True,
                 )
 
                 failed_traces.append(
                     {
-                        "task_id": df.iloc[idx]["question_ID"],
+                        "task_id": id,
                         "task_index": idx + 1,
                         "error": error_msg,
                         "error_type": type(e).__name__,
@@ -294,7 +305,7 @@ async def main(save_folder: str, df):
                 )
 
                 print(
-                    f"\n!  Failed task {idx + 1}/{len(df)}: {df.iloc[idx]["question_ID"]}"
+                    f"\n!  Failed task {idx + 1}/{len(df)}: {id}"
                 )
                 print(f"   Error: {error_msg}\n")
                 continue
@@ -313,13 +324,13 @@ async def main(save_folder: str, df):
             with judge_client.start_as_current_span(
                 name=f"evaluate_task_{task}",
                 input={
-                    "task_id": df.iloc[idx]["question_ID"],
-                    "trace_id": df.iloc[idx]["question_ID"],
+                    "task_id": id,
+                    "trace_id": id,
                 },
                 metadata=trace_metadata,
             ) as span:
                 judge_client.update_current_trace(
-                    tags=["test", f"task_id:{df.iloc[idx]["question_ID"]}"]
+                    tags=["test", f"task_id:{id}"]
                 )
 
                 logger.info("Executing evaluation pipeline...")
@@ -340,7 +351,7 @@ async def main(save_folder: str, df):
                         "item_id": "overall_score",
                         "score": result_dict,
                         "idx": idx,
-                        "task_id": df.iloc[idx]["question_ID"],
+                        "task_id": id,
                         "ground_truth": trace_metadata["ground_truth"],
                         "correct_answer": str(trace_metadata["correct_answer"]),
                         "gt_agent": df.iloc[idx]["mistake_agent"],
@@ -365,7 +376,7 @@ async def main(save_folder: str, df):
         except Exception as e:
             error_msg = str(e)
             safe_error_msg = error_msg.replace("{", "{{").replace("}", "}}")
-            task_id = df.iloc[idx]["question_ID"]
+            task_id = id
             logger.error(
                 f"Error processing task {task_id}: {safe_error_msg}", exc_info=True
             )
@@ -424,16 +435,27 @@ async def main(save_folder: str, df):
 
 
 if __name__ == "__main__":
-    # df_handcrafted = pd.read_parquet(
-    #     "hf://datasets/Kevin355/Who_and_When/Hand-Crafted.parquet"
-    # )
-    df_algorithm = pd.read_parquet(
-        "hf://datasets/Kevin355/Who_and_When/Algorithm-Generated.parquet"
+    df_handcrafted = pd.read_parquet(
+        "hf://datasets/Kevin355/Who_and_When/Hand-Crafted.parquet"
     )
+    # df_algorithm = pd.read_parquet(
+    #     "hf://datasets/Kevin355/Who_and_When/Algorithm-Generated.parquet"
+    # )
+    directory = Path("/Users/alina/Desktop/ITMO/AutoJudge/examples/who_and_when/hand_summary")
+    
+    summary = []
+    for dir in directory.iterdir():
+        if dir.is_file() and dir.suffix == ".json":
+            with open(dir, "r") as f:
+                data = json.load(f)
+                print(f"Data from {dir.name}: {data}")
+                summary.append([data, dir.name.split(".")[0]])
+    df_summary = pd.DataFrame(summary, columns=["summary", "question_ID"])
 
     asyncio.run(
         main(
-            save_folder="test",
-            df=df_algorithm[:],
+            save_folder="db_tool_handcrafted",
+            df=df_handcrafted,
+            df_summary=df_summary
         )
     )

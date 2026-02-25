@@ -74,7 +74,7 @@ Simple evaluation (1 judge):
   {
     "name": "TASK_CORRECTNESS_JUDGE",
     "instructions": "**Instruction**:\n\nYou are tasked with evaluating whether the agent's final response accurately solves the user's task. Focus on:\n- Exact match to expected output format (GAIA: short, no units/explanations)\n- Factual correctness against ground truth\n- Completeness (all required elements present)\n\n**Scoring**:\n- \"ideal\" if perfectly correct and formatted\n- \"fair\" if minor format/content issues\n- \"poor\" if fundamentally wrong or incomplete\n\nReturn JSON: {\"response_id\": \"...\", \"justification\": \"...\", \"score\": \"ideal|fair|poor\"}",
-    "mcp_tools": []
+    "mcp_tools": [get_content_tool]
   }
 ]
 
@@ -96,7 +96,7 @@ You are an evaluation assistant assessing whether a tool call correctly matches 
 - \"poor\" if inappropriate (better alternatives exist)
 
 Return JSON array with {\"state_id\": \"...\", \"justification\": \"...\", \"score\": \"...\"}",
-    "mcp_tools": []
+    "mcp_tools": [get_content_tool]
   },
   {
     "name": "FINAL_AGGREGATOR",
@@ -189,12 +189,12 @@ Return a single JSON object with fields:
 - justification: concise synthesis of the decisive factors leading to the binary score.
 - score: one of {"ideal", "poor"} ONLY
 - confidence: a float in [0.0, 10.0] reflecting how strongly the available evidence supports the chosen score",
-    mcp_tools": []
+    mcp_tools": [get_content_tool]
   },
   {
     "name": "EFFICIENCY_JUDGE",
     "instructions": "**Instruction**:\n\nAssess agent's efficiency:\n- Minimal tool calls needed?\n- No redundant steps?\n- Fastest path to solution?\n\n**Scoring**:\n- \"ideal\": Optimal efficiency\n- \"fair\": Reasonable but improvable\n- \"poor\": Wasteful/redundant\n\nReturn JSON: {\"response_id\": \"...\", \"justification\": \"...\", \"score\": \"...\"}",
-    "mcp_tools": []
+    "mcp_tools": [get_content_tool]
   },
   {
     "name": "MAS_ROLES_DISTRIBUTION",
@@ -223,7 +223,7 @@ Focus on how evenly and appropriately responsibilities are allocated across the 
 The evaluation input is provided via dependency injection. Access the dialogue history and agent responses from the evaluation input to perform your assessment.
 
 Return a single JSON object, score (ideal/fair/poor), justification.",
-    "mcp_tools": []
+    "mcp_tools": [get_content_tool]
   }
 ]
 
@@ -271,12 +271,15 @@ ${examples}
 
 RULES:
 - Ensure all judge names are unique and descriptive (end with _JUDGE)!
-- Never use mcp-tools for judges!
+- You should always ask judges to use tool (get_content_tool) to recive a context (1 or 2 times per judge)!
 - Instructions must include explicit scoring criteria (ideal/fair/poor)
 - Each judge returns JSON with justification + score
 - Focus judges on detecting specific problem categories: task failures, API errors, setup issues, tool misuse, etc.
 - Include TOOL_SELECTION_JUDGE or TOOL_PERFORMANCE_JUDGE when evaluating tool-based systems
 - Always include FINAL_AGGREGATOR as the final judge that synthesizes all findings into binary score (poor/ideal) and justification
+
+**CRITICAL: TOOLS:**
+Force the court to use tools! Be sure to specify in the prompt that they should call the tool!!!
 
 **CRITICAL: FINAL_AGGREGATOR NAME:**
 FINAL_AGGREGATOR must be named exactly "FINAL_AGGREGATOR" (case-sensitive)
