@@ -79,5 +79,6 @@ async def get_content_function(
 get_content_tool = Tool(
     get_content_function,
     name="get_content_tool",
-    description="Fetch a row's content from DB"
+    description="Fetch a row's content from DB",
+    takes_ctx=True
 )
