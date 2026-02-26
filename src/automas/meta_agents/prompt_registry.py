@@ -279,13 +279,13 @@ RULES:
 - Always include FINAL_AGGREGATOR as the final judge that synthesizes all findings into binary score (poor/ideal) and justification
 
 **CRITICAL: TOOLS:**
-Force the court to use tools! Be sure to specify in the prompt that they should call the tool!!!
+Force the court to use tools! Be sure to specify in the prompt that they should call the tool!!! But, FINAL_AGGREGATOR should not use tools!
 
-**CRITICAL: FINAL_AGGREGATOR NAME:**
+**ATTENTION CRITICAL: FINAL_AGGREGATOR NAME:**
 FINAL_AGGREGATOR must be named exactly "FINAL_AGGREGATOR" (case-sensitive)
 
-**CRITICAL: FINAL_AGGREGATOR OUTPUT FORMAT:**
-FINAL_AGGREGATOR must include these exact instructions at the end:
+**ATTENTION CRITICAL: FINAL_AGGREGATOR OUTPUT FORMAT:**
+FINAL_AGGREGATOR must include these exact instructions at the end (it is important that it has the same output format as indicated below)):
 
 ${judge_output_format}
 
