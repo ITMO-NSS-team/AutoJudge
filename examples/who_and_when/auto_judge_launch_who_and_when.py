@@ -36,6 +36,14 @@ You must determine the most guilty agent in the evaluated 'history_for_evaluatin
   "reason": "reason of your prediction"
 }
 
+**CRITICAL RULES:**
+- Return ONLY the JSON object, nothing else
+- NO markdown code fences (no ```json or ```)
+- NO explanatory text before or after the JSON
+- NO additional fields (no score, no confidence, no metadata)
+- agent must be the exact agent name as it appears in the trace
+- step must be a plain integer string: "1", "2", "3", etc.
+
 **STEP RULE:** This is the sequential position of the message in 'history_for_evaluating' (1 = first message, 2 = second message, etc). Use ONLY integers. Do NOT use IDs, UUIDs, strings, or any other identifiers.
 
 **VALID EXAMPLE:**
@@ -44,6 +52,16 @@ You must determine the most guilty agent in the evaluated 'history_for_evaluatin
   "step": "1", 
   "reason": "The agent fails to collect price data for the daily tickets and season passes for California's Great America in 2024."
 }
+
+
+INVALID EXAMPLES (DO NOT USE THIS FORMAT):
+```json
+{
+  "agent": "Orchestrator",
+  "step": "21",
+  "reason": "The Orchestrator is the most guilty agent. Despite the WebSurfer's repeated failures to find clear Vudu listings for 'The Tenant' and 'Nosferatu the Vampyre' (as noted in steps 13 and 17), and the subsequent 'ResponsibleAIPolicyViolation' error in step 21, the Orchestrator still allowed the final answer to be 'The Tenant' without any verified evidence of its availability on Vudu. This indicates a failure in the Orchestrator's decision-making process to ensure all constraints were met before providing a final answer. The Orchestrator also repeatedly asked the WebSurfer to check for Vudu availability without changing its strategy, indicating a lack of progress and looping, as highlighted by the Search Integrity Judge."
+}
+```
 
 **INVALID STEP EXAMPLES:** "step1", "abc-123", "task_id_45", "first" — ONLY USE: "1", "2", "3", etc.
 """
@@ -139,7 +157,6 @@ Analyze execution trace to identify environment setup and configuration errors t
 3. *Environment Variables* - Missing or invalid env vars (os.environ KeyError)
 4. *Config Files* - Missing or malformed configs (FileNotFoundError, JSONDecodeError)
 5. *Dependencies* - Import errors or version conflicts (ModuleNotFoundError)
-
 You must use the available tools at least once!
 
 **Out of Scope**: HTTP status codes (401, 403, 429, 500), runtime API errors, network timeouts
@@ -162,7 +179,6 @@ Example 5 - API Issues Detection:
 Analyze execution trace to identify API-related errors during RUNTIME execution.
 
 **Scope**: Focus on runtime API communication errors, NOT initialization/config errors.
-
 You must use the available tools at least once!
 
 **Evaluation Criteria** - Look for trace entries showing:
@@ -181,10 +197,31 @@ You must use the available tools at least once!
 - \"poor\": Critical API errors prevented task completion or occurred repeatedly
 
 Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": [get_content_tool]
+    "mcp_tools": []
+  }
+]
+
+Example 6 - Tool Selection Evaluation:
+[
+  {
+    "name": "TOOL_SELECTION_JUDGE",
+    "instructions": "**Instruction**:
+Assess whether tool selections made by the agent are appropriate for the task.
+
+**Evaluation Criteria**:
+1. *Tool Relevance* - Does the selected tool directly address the node_role responsibility?
+2. *Pipeline Position* - Is the tool suitable given the agent's position in the pipeline?
+3. *Justification* - Is the tool selection clearly supported by the task requirements?
+
+**Scoring**:
+- \"ideal\": Tool selection perfectly matches node_role and is clearly justified
+- \"fair\": Selection is relevant but potentially suboptimal for the task
+- \"poor\": Selection is inappropriate or clearly mismatched to node_role
+
+Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "mcp_tools": []
   }
 ]"""
-
 
 def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
     graph_dict = {}
@@ -342,7 +379,7 @@ async def main(save_folder: str, df, df_summary):
                 span.update(output={"result": result, "trace_id": trace_id})
                 span.end()
 
-            result_dict = json.loads(result)
+            result_dict = json.loads(result.replace("```json", "").replace("```", "").strip())
 
             serializable_results["summarizer_score"] = {
                 "metric_name": "summarizer_score",
@@ -454,7 +491,7 @@ if __name__ == "__main__":
 
     asyncio.run(
         main(
-            save_folder="db_tool_handcrafted",
+            save_folder="db_tool_not_necessary_hand",
             df=df_handcrafted,
             df_summary=df_summary
         )
