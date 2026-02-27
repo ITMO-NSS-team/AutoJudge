@@ -13,6 +13,7 @@ from pydantic_ai.providers.openrouter import OpenRouterProvider
 from automas.mcp import registry
 from automas.pipeline.types import UsageTrackingMixin
 from automas.utils.langfuse_utils import setup_langfuse_instrumentation
+from automas.db.db_tools import get_content_tool
 
 load_dotenv()
 
@@ -49,15 +50,15 @@ class AgentNode(UsageTrackingMixin):
             settings={"temperature": AGENT_NODE_TEMPERATURE},
         )
 
-        # Get MCP toolsets if any MCP tools are specified
-        toolsets = []
-        if self.mcp_tools:
-            toolsets = registry.get_mcp_toolsets(self.mcp_tools)
+        tools = [get_content_tool]
+        
+        # if self.mcp_tools:
+        #     toolsets = registry.get_mcp_toolsets(self.mcp_tools)
 
         return Agent(
             name=self.name,
             model=model,
-            toolsets=toolsets,
+            tools=tools,
             instructions=self.instructions,
             retries=3,
             instrument=True,
