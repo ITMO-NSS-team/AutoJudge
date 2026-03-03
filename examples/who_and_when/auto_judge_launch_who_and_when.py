@@ -472,13 +472,13 @@ async def main(save_folder: str, df, df_summary):
 
 
 if __name__ == "__main__":
-    df_handcrafted = pd.read_parquet(
-        "hf://datasets/Kevin355/Who_and_When/Hand-Crafted.parquet"
-    )
-    # df_algorithm = pd.read_parquet(
-    #     "hf://datasets/Kevin355/Who_and_When/Algorithm-Generated.parquet"
+    # df_handcrafted = pd.read_parquet(
+    #     "hf://datasets/Kevin355/Who_and_When/Hand-Crafted.parquet"
     # )
-    directory = Path("/Users/alina/Desktop/ITMO/AutoJudge/examples/who_and_when/hand_summary")
+    df_algorithm = pd.read_parquet(
+        "hf://datasets/Kevin355/Who_and_When/Algorithm-Generated.parquet"
+    )
+    directory = Path("/Users/alina/Desktop/ITMO/AutoJudge/examples/who_and_when/algo_summary")
     
     summary = []
     for dir in directory.iterdir():
@@ -491,8 +491,8 @@ if __name__ == "__main__":
 
     asyncio.run(
         main(
-            save_folder="db_tool_not_necessary_hand",
-            df=df_handcrafted,
+            save_folder="db_tool_algo",
+            df=df_algorithm,
             df_summary=df_summary
         )
     )
