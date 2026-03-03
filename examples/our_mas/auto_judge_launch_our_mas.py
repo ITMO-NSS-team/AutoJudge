@@ -382,49 +382,49 @@ async def main(name: str, save_folder: str, num_traces: int | None = None):
             print(f"   Error: {error_msg}\n")
             continue
 
-        output_dir = local_results_dir
-        output_dir.mkdir(exist_ok=True)
-        failed_file = output_dir / "failed_traces.txt"
+    output_dir = local_results_dir
+    output_dir.mkdir(exist_ok=True)
+    failed_file = output_dir / "failed_traces.txt"
 
-        if failed_traces_ids:
+    if failed_traces_ids:
+        with open(failed_file, "w") as f:
+            f.write(
+                f"Failed traces: {len(failed_traces)} out of {len(traces_page1.data)}\n"
+            )
+            f.write("=" * 80 + "\n\n")
+
+            for failed in failed_traces:
+                f.write(f"Task ID: {failed['task_id']}\n")
+                f.write(f"Index: {failed['task_index']}/{len(traces_page1.data)}\n")
+                f.write(f"Error Type: {failed['error_type']}\n")
+                f.write(f"Error Message: {failed['error']}\n")
+                f.write("-" * 80 + "\n\n")
+
+    else:
+        if failed_traces:
             with open(failed_file, "w") as f:
-                f.write(
-                    f"Failed traces: {len(failed_traces)} out of {len(traces_page1.data)}\n"
-                )
-                f.write("=" * 80 + "\n\n")
-
                 for failed in failed_traces:
                     f.write(f"Task ID: {failed['task_id']}\n")
-                    f.write(f"Index: {failed['task_index']}/{len(traces_page1.data)}\n")
+                    f.write(
+                        f"Index: {failed['task_index']}/{len(traces_page1.data)}\n"
+                    )
                     f.write(f"Error Type: {failed['error_type']}\n")
                     f.write(f"Error Message: {failed['error']}\n")
                     f.write("-" * 80 + "\n\n")
 
-        else:
-            if failed_traces:
-                with open(failed_file, "w") as f:
-                    for failed in failed_traces:
-                        f.write(f"Task ID: {failed['task_id']}\n")
-                        f.write(
-                            f"Index: {failed['task_index']}/{len(traces_page1.data)}\n"
-                        )
-                        f.write(f"Error Type: {failed['error_type']}\n")
-                        f.write(f"Error Message: {failed['error']}\n")
-                        f.write("-" * 80 + "\n\n")
+    if len(failed_traces) > 0:
+        logger.warning(
+            f"\n!  {len(failed_traces)} traces failed. Details saved to: {failed_file}\n"
+        )
 
-        if len(failed_traces) > 0:
-            logger.warning(
-                f"\n!  {len(failed_traces)} traces failed. Details saved to: {failed_file}\n"
-            )
-
-        if failed_traces_ids:
-            logger.info(
-                f"Completed evaluation: {len(traces_page1.data) - (len(failed_traces) + len(failed_traces_ids))}/{len(traces_page1.data)} successful, {len(failed_traces) + len(failed_traces_ids)} failed"
-            )
-        else:
-            logger.info(
-                f"Completed evaluation: {len(traces_page1.data) - len(failed_traces)}/{len(traces_page1.data)} successful, {len(failed_traces)} failed"
-            )
+    if failed_traces_ids:
+        logger.info(
+            f"Completed evaluation: {len(traces_page1.data) - (len(failed_traces) + len(failed_traces_ids))}/{len(traces_page1.data)} successful, {len(failed_traces) + len(failed_traces_ids)} failed"
+        )
+    else:
+        logger.info(
+            f"Completed evaluation: {len(traces_page1.data) - len(failed_traces)}/{len(traces_page1.data)} successful, {len(failed_traces)} failed"
+        )
 
 
 if __name__ == "__main__":
