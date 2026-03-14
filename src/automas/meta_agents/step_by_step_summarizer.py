@@ -14,7 +14,9 @@ class StepByStepSummaryItem(BaseModel):
     id: str = Field(description="Step id in format <trace_id>_<step> (e.g., abc123_1)")
     name: str = Field(description="Agent name")
     role: str = Field(description="Agent role")
-    content_summary: str = Field(description="Concise summary of what happened in this step")
+    content_summary: str = Field(
+        description="Concise summary of what happened in this step"
+    )
 
 
 class StepByStepSummary(BaseModel):
@@ -59,7 +61,7 @@ class StepByStepSummarizer:
         def get_system_prompt(ctx: RunContext[TraceInput]) -> str:
             """Generate system prompt with trace data."""
             trace_input = ctx.deps
-            
+
             return f"""{self.prompt_template}
 
 **TRACE_ID:**
@@ -73,11 +75,11 @@ class StepByStepSummarizer:
 
     async def summarize(self, trace: str, trace_id: str = "trace") -> StepByStepSummary:
         """Summarize the execution trace.
-        
+
         Args:
             trace: Raw execution trace string
             trace_id: Unique trace id used to build step ids (<trace_id>_<step>)
-            
+
         Returns:
             StepByStepSummary object with structured analysis
         """

@@ -10,6 +10,7 @@ DB_PASSWORD = ""  # set to None if no password
 DB_HOST = "localhost"
 DB_PORT = 5432
 
+
 def drop_table():
     conn = get_conn(DB_NAME)
     cur = conn.cursor()
@@ -22,13 +23,10 @@ def drop_table():
 
     print("who_when dropped")
 
+
 def get_conn(db):
     return psycopg2.connect(
-        dbname=db,
-        user=DB_USER,
-        password=DB_PASSWORD,
-        host=DB_HOST,
-        port=DB_PORT
+        dbname=db, user=DB_USER, password=DB_PASSWORD, host=DB_HOST, port=DB_PORT
     )
 
 
@@ -52,18 +50,24 @@ def create_table():
     conn = get_conn(DB_NAME)
     cur = conn.cursor()
 
-    cur.execute("""
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS who_when (
             id TEXT NOT NULL,
             state_id TEXT PRIMARY KEY,
             state_index INT NOT NULL,
             content JSONB NOT NULL
         );
-    """)
+    """
+    )
 
     cur.execute("CREATE INDEX IF NOT EXISTS idx_who_when_id ON who_when(id);")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_who_when_state_index ON who_when(state_index);")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_who_when_content ON who_when USING GIN(content);")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_who_when_state_index ON who_when(state_index);"
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_who_when_content ON who_when USING GIN(content);"
+    )
 
     conn.commit()
     cur.close()
@@ -85,12 +89,7 @@ def transform(df):
         for i, state in enumerate(history, 1):
             state_id = f"{trace_id}_{i}"
 
-            rows.append((
-                trace_id,
-                state_id,
-                i,
-                json.dumps(state)
-            ))
+            rows.append((trace_id, state_id, i, json.dumps(state)))
 
     return rows
 

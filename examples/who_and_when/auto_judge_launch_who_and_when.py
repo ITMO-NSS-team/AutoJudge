@@ -223,6 +223,7 @@ Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
   }
 ]"""
 
+
 def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
     graph_dict = {}
     _agents_info = agent_pool.full_agents_data
@@ -236,7 +237,9 @@ def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
     return graph_dict
 
 
-async def main(save_folder: str, df, df_summary, table_name: str, num_traces: int | None = None):
+async def main(
+    save_folder: str, df, df_summary, table_name: str, num_traces: int | None = None
+):
     logger.info(f"===Starting Who&When evaluation===")
 
     pool_gen = PoolGenerator(
@@ -270,16 +273,14 @@ async def main(save_folder: str, df, df_summary, table_name: str, num_traces: in
         df = df[:num_traces]
 
     for idx in range(len(df)):
-        id = df.iloc[idx]["question_ID"] 
+        id = df.iloc[idx]["question_ID"]
         if id in done_traces:
             question_id = id
             logger.info(f"Task {question_id} already processed, skipping...")
             continue
 
         if id in failed_traces_ids:
-            logger.info(
-                f"Task {id} already failed, skipping..."
-            )
+            logger.info(f"Task {id} already failed, skipping...")
             continue
 
         task = id
@@ -345,9 +346,7 @@ async def main(save_folder: str, df, df_summary, table_name: str, num_traces: in
                     }
                 )
 
-                print(
-                    f"\n!  Failed task {idx + 1}/{len(df)}: {id}"
-                )
+                print(f"\n!  Failed task {idx + 1}/{len(df)}: {id}")
                 print(f"   Error: {error_msg}\n")
                 continue
 
@@ -370,9 +369,7 @@ async def main(save_folder: str, df, df_summary, table_name: str, num_traces: in
                 },
                 metadata=trace_metadata,
             ) as span:
-                judge_client.update_current_trace(
-                    tags=["test", f"task_id:{id}"]
-                )
+                judge_client.update_current_trace(tags=["test", f"task_id:{id}"])
 
                 logger.info("Executing evaluation pipeline...")
                 result, trace_id = await ainvoke_with_lf(
@@ -383,7 +380,9 @@ async def main(save_folder: str, df, df_summary, table_name: str, num_traces: in
                 span.update(output={"result": result, "trace_id": trace_id})
                 span.end()
 
-            result_dict = json.loads(result.replace("```json", "").replace("```", "").strip())
+            result_dict = json.loads(
+                result.replace("```json", "").replace("```", "").strip()
+            )
 
             serializable_results["summarizer_score"] = {
                 "metric_name": "summarizer_score",
@@ -478,7 +477,7 @@ if __name__ == "__main__":
     #     "hf://datasets/Kevin355/Who_and_When/Algorithm-Generated.parquet"
     # )
     summaries_directory = Path("path to who_and_when summaries")
-    
+
     summary = []
     for dir in summaries_directory.iterdir():
         if dir.is_file() and dir.suffix == ".json":

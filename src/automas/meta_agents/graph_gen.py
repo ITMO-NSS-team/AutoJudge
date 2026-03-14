@@ -8,6 +8,7 @@ from automas.utils.logger import get_logger
 from .base import DEFAULT_MODEL, BaseMetaAgent
 from .prompt_registry import DEFAULT_GRAPH_INSTRUCT
 import os
+
 if TYPE_CHECKING:
     from automas.agent_pool import AgentPool
 
@@ -32,7 +33,9 @@ class GraphGenerator(BaseMetaAgent):
     def _get_output_type(self):
         return GraphDict
 
-    def _validate_response(self, graph_dict: GraphDict, agent_pool: "AgentPool") -> None:
+    def _validate_response(
+        self, graph_dict: GraphDict, agent_pool: "AgentPool"
+    ) -> None:
         logger.debug(f"Validating graph response: {graph_dict}")
 
         agent_names = [agent.name for agent in agent_pool]

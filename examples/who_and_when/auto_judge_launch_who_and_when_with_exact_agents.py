@@ -225,7 +225,9 @@ Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
 ]"""
 
 
-async def main(save_folder: str, df, df_summary, table_name: str, num_traces: int | None = None):
+async def main(
+    save_folder: str, df, df_summary, table_name: str, num_traces: int | None = None
+):
     logger.info(f"===Starting Who&When evaluation===")
 
     pool_gen = PoolGenerator_WW(
@@ -261,16 +263,14 @@ async def main(save_folder: str, df, df_summary, table_name: str, num_traces: in
         df = df[:num_traces]
 
     for idx in range(len(df)):
-        id = df.iloc[idx]["question_ID"] 
+        id = df.iloc[idx]["question_ID"]
         if id in done_traces:
             question_id = id
             logger.info(f"Task {question_id} already processed, skipping...")
             continue
 
         if id in failed_traces_ids:
-            logger.info(
-                f"Task {id} already failed, skipping..."
-            )
+            logger.info(f"Task {id} already failed, skipping...")
             continue
 
         task = id
@@ -317,19 +317,27 @@ async def main(save_folder: str, df, df_summary, table_name: str, num_traces: in
                         agent.get("name") == "FINAL_AGGREGATOR" for agent in agents_info
                     )
                     guilty_agent_finder = any(
-                        agent.get("name") == "GUILTY_AGENT_FINDER" for agent in agents_info
+                        agent.get("name") == "GUILTY_AGENT_FINDER"
+                        for agent in agents_info
                     )
                     step_of_error_finder = any(
-                        agent.get("name") == "STEP_OF_ERROR_FINDER" for agent in agents_info
+                        agent.get("name") == "STEP_OF_ERROR_FINDER"
+                        for agent in agents_info
                     )
 
                     if final_agent and guilty_agent_finder and step_of_error_finder:
                         logger.info(f"Generated correct pool on {attempts + 1} attempt")
                         break
                     else:
-                        missing_agents.append("FINAL_AGGREGATOR" if not final_agent else "")
-                        missing_agents.append("GUILTY_AGENT_FINDER" if not guilty_agent_finder else "")
-                        missing_agents.append("STEP_OF_ERROR_FINDER" if not step_of_error_finder else "")
+                        missing_agents.append(
+                            "FINAL_AGGREGATOR" if not final_agent else ""
+                        )
+                        missing_agents.append(
+                            "GUILTY_AGENT_FINDER" if not guilty_agent_finder else ""
+                        )
+                        missing_agents.append(
+                            "STEP_OF_ERROR_FINDER" if not step_of_error_finder else ""
+                        )
 
                     attempts += 1
 
@@ -348,9 +356,7 @@ async def main(save_folder: str, df, df_summary, table_name: str, num_traces: in
                     }
                 )
 
-                print(
-                    f"\n!  Failed task {idx + 1}/{len(df)}: {id}"
-                )
+                print(f"\n!  Failed task {idx + 1}/{len(df)}: {id}")
                 print(f"   Error: {error_msg}\n")
                 continue
 
@@ -373,9 +379,7 @@ async def main(save_folder: str, df, df_summary, table_name: str, num_traces: in
                 },
                 metadata=trace_metadata,
             ) as span:
-                judge_client.update_current_trace(
-                    tags=["test", f"task_id:{id}"]
-                )
+                judge_client.update_current_trace(tags=["test", f"task_id:{id}"])
 
                 logger.info("Executing evaluation pipeline...")
                 result, trace_id = await ainvoke_with_lf(
@@ -386,7 +390,9 @@ async def main(save_folder: str, df, df_summary, table_name: str, num_traces: in
                 span.update(output={"result": result, "trace_id": trace_id})
                 span.end()
 
-            result_dict = json.loads(result.replace("```json", "").replace("```", "").strip())
+            result_dict = json.loads(
+                result.replace("```json", "").replace("```", "").strip()
+            )
 
             serializable_results["summarizer_score"] = {
                 "metric_name": "summarizer_score",
@@ -489,7 +495,7 @@ if __name__ == "__main__":
     # )
 
     summaries_directory = Path("path to who_and_when summaries")
-    
+
     summary = []
     for dir in summaries_directory.iterdir():
         if dir.is_file() and dir.suffix == ".json":

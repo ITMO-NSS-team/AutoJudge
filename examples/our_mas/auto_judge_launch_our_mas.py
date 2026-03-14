@@ -200,7 +200,13 @@ def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
     return graph_dict
 
 
-async def main(name: str, save_folder: str, df_summary, table_name: str, num_traces: int | None = None):
+async def main(
+    name: str,
+    save_folder: str,
+    df_summary,
+    table_name: str,
+    num_traces: int | None = None,
+):
     logger.info(f"Starting AutoMAS evaluation for task name: {name}")
 
     pool_gen = PoolGenerator(
@@ -212,10 +218,12 @@ async def main(name: str, save_folder: str, df_summary, table_name: str, num_tra
 
     traces_page1 = lf.api.trace.list(name=name, limit=50, page=1)
     traces_page2 = lf.api.trace.list(name=name, limit=50, page=2)
-    traces_page3 = lf.api.trace.list(name=name, limit=50, page=3) 
+    traces_page3 = lf.api.trace.list(name=name, limit=50, page=3)
     traces_page4 = lf.api.trace.list(name=name, limit=50, page=4)
 
-    all_traces = traces_page1.data + traces_page2.data + traces_page3.data + traces_page4.data
+    all_traces = (
+        traces_page1.data + traces_page2.data + traces_page3.data + traces_page4.data
+    )
     task_ids = [item.id for item in all_traces]
 
     if not task_ids:
@@ -292,7 +300,11 @@ async def main(name: str, save_folder: str, df_summary, table_name: str, num_tra
             #     state.model_dump(mode="json") for state in query.agent_states
             # ]
 
-            judge_input = {"query": query.user_query, "history_for_evaluating": str(q), "table_name": table_name}
+            judge_input = {
+                "query": query.user_query,
+                "history_for_evaluating": str(q),
+                "table_name": table_name,
+            }
 
             logger.info("Generating judge pool...")
 
@@ -344,7 +356,12 @@ async def main(name: str, save_folder: str, df_summary, table_name: str, num_tra
                 input={"task_id": task_id, "trace_id": task_id},
                 metadata=trace_metadata,
             ) as span:
-                judge_client.update_current_trace(tags=["test_batch_summary_small_mas(11.03.26)", f"task_id:{task_id}"])
+                judge_client.update_current_trace(
+                    tags=[
+                        "test",
+                        f"task_id:{task_id}",
+                    ]
+                )
 
                 logger.info("Executing evaluation pipeline...")
                 result, trace_id = await ainvoke_with_lf(
@@ -362,7 +379,7 @@ async def main(name: str, save_folder: str, df_summary, table_name: str, num_tra
                 result_clean = "\n".join(lines[1:-1]).strip()
 
             result_dict = json.loads(result_clean)
-            
+
             serializable_results["summarizer_score"] = {
                 "metric_name": "summarizer_score",
                 "scores": [
@@ -415,9 +432,7 @@ async def main(name: str, save_folder: str, df_summary, table_name: str, num_tra
         first_run = not failed_file.exists()
         with open(failed_file, "a") as f:
             if first_run:
-                f.write(
-                    f"Failed traces: {len(failed_traces)} out of {len(task_ids)}\n"
-                )
+                f.write(f"Failed traces: {len(failed_traces)} out of {len(task_ids)}\n")
                 f.write("=" * 80 + "\n\n")
 
             for failed in failed_traces:
@@ -444,7 +459,7 @@ async def main(name: str, save_folder: str, df_summary, table_name: str, num_tra
 
 if __name__ == "__main__":
     summaries_directory = Path("path to our_mas (GHOST) summaries")
-    
+
     summary = []
     for dir in summaries_directory.iterdir():
         if dir.is_file() and dir.suffix == ".json":
@@ -456,10 +471,10 @@ if __name__ == "__main__":
     asyncio.run(
         main(
             # name="gaia_task_db0c3ed0-a4af-4442-bb6f-884d6da055cb", # big mas
-            name="gaia_task_07aac7b1-ffc3-4787-8e4c-7fb522156097", # small mas
+            name="gaia_task_07aac7b1-ffc3-4787-8e4c-7fb522156097",  # small mas
             save_folder="test",
             df_summary=df_summary,
-            table_name="our_mas"
+            table_name="our_mas",
             # num_traces=30,
         )
     )

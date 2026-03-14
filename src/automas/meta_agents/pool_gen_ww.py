@@ -28,9 +28,11 @@ class PoolGenerator_WW(BaseMetaAgent):
         temperature: float = 0.3,
         output_schema: str = "",
         taxonomy: str = "",
-        examples: str = ""
+        examples: str = "",
     ):
-        print(f"Initializing PoolGenerator with model={model}, temperature={temperature}")
+        print(
+            f"Initializing PoolGenerator with model={model}, temperature={temperature}"
+        )
         self.schema = output_schema
         self.taxonomy = taxonomy
         self.examples = examples
@@ -39,12 +41,13 @@ class PoolGenerator_WW(BaseMetaAgent):
             temperature=temperature,
         )
 
-
     def _get_system_prompt(self) -> str:
         mcp_servers_desc = get_server_descriptions()
         return DEFAULT_POOL_INSTRUCT_EXTENDED_WW.substitute(
-            mcp_servers_desc=mcp_servers_desc, taxonomy=self.taxonomy, 
-            judge_output_format=self.schema, examples=self.examples
+            mcp_servers_desc=mcp_servers_desc,
+            taxonomy=self.taxonomy,
+            judge_output_format=self.schema,
+            examples=self.examples,
         )
 
     def _get_output_type(self):
@@ -54,7 +57,9 @@ class PoolGenerator_WW(BaseMetaAgent):
         if not agent_schemas:
             raise ValueError("No valid agents generated")
 
-        logger.info(f"Creating {len(agent_schemas)} agents: {[s.name for s in agent_schemas]}")
+        logger.info(
+            f"Creating {len(agent_schemas)} agents: {[s.name for s in agent_schemas]}"
+        )
 
         return [
             AgentNode(
@@ -66,7 +71,9 @@ class PoolGenerator_WW(BaseMetaAgent):
             for schema in agent_schemas
         ]
 
-    async def create_pool(self, task_description: str, context: Optional[str] = None) -> AgentPool:
+    async def create_pool(
+        self, task_description: str, context: Optional[str] = None
+    ) -> AgentPool:
         user_prompt = f"TASK: {task_description}"
 
         if context:

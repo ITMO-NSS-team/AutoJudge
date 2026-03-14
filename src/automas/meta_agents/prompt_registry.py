@@ -53,7 +53,8 @@ JSON_OBJECT_OUTPUT_FORMAT = """
 
 # default MAS prompts
 DEFAULT_POOL_INSTRUCT = Template(
-    Template("""
+    Template(
+        """
 You are an AI judge pool generator specialized in creating teams of LLM judges for evaluating agentic systems.
 
 DESIGN PRINCIPLES:
@@ -239,7 +240,8 @@ RULES:
 
 OUTPUT FORMAT:
 ${json_array_output_format}
-""").safe_substitute(
+"""
+    ).safe_substitute(
         json_array_response_format=JSON_ARRAY_RESPONSE_FORMAT.strip(),
         json_array_output_format=JSON_ARRAY_OUTPUT_FORMAT.strip(),
     )
@@ -247,7 +249,8 @@ ${json_array_output_format}
 
 # Extended version with additional judge examples
 DEFAULT_POOL_INSTRUCT_EXTENDED = Template(
-    Template("""
+    Template(
+        """
 You are an AI judge pool generator specialized in creating evaluation pipelines for multi-agent systems.
 Your goal is to design a team of specialized judges that detect problems, errors, and quality issues in system execution.
 
@@ -291,7 +294,8 @@ ${judge_output_format}
 
 OUTPUT FORMAT:
 ${json_array_output_format}
-""").safe_substitute(
+"""
+    ).safe_substitute(
         json_array_response_format=JSON_ARRAY_RESPONSE_FORMAT.strip(),
         json_array_output_format=JSON_ARRAY_OUTPUT_FORMAT.strip(),
     )
@@ -299,7 +303,8 @@ ${json_array_output_format}
 
 
 DEFAULT_POOL_INSTRUCT_EXTENDED_WW = Template(
-    Template("""
+    Template(
+        """
 You are an AI judge pool generator specialized in creating evaluation pipelines for multi-agent systems.
 Your goal is to design a team of specialized judges that detect problems, errors, and quality issues in system execution.
 
@@ -354,7 +359,8 @@ ${judge_output_format}
 
 OUTPUT FORMAT:
 ${json_array_output_format}
-""").safe_substitute(
+"""
+    ).safe_substitute(
         json_array_response_format=JSON_ARRAY_RESPONSE_FORMAT.strip(),
         json_array_output_format=JSON_ARRAY_OUTPUT_FORMAT.strip(),
     )
@@ -362,7 +368,8 @@ ${json_array_output_format}
 
 
 DEFAULT_GRAPH_INSTRUCT = Template(
-    Template("""
+    Template(
+        """
 You are an AI workflow designer specialized in creating evaluation pipelines for multi-agent systems.
 Your goal is to design an optimal flow of judges that efficiently detect problems, errors, and quality issues.
 
@@ -419,17 +426,18 @@ Parallel processing (5 agents):
     "MAS_TASK_COMPLETION_JUDGE": ["FINAL_AGGREGATOR"],
     "FINAL_AGGREGATOR": []
 }
-""").safe_substitute(
+"""
+    ).safe_substitute(
         json_object_response_format=JSON_OBJECT_RESPONSE_FORMAT.strip(),
     )
 )
 
 
-
 # decentralized MAS prompts
 
 DECENTRALIZED_POOL_INSTRUCT = Template(
-    Template("""
+    Template(
+        """
 You are an AI agent pool generator specialized in creating EFFICIENT DECENTRALIZED multi-agent systems.
 
 AVAILABLE MCP TOOLS:
@@ -567,7 +575,8 @@ ${gaia_answer_format_requirements}
 
 OUTPUT FORMAT:
 ${json_array_output_format}
-""").safe_substitute(
+"""
+    ).safe_substitute(
         json_array_response_format=JSON_ARRAY_RESPONSE_FORMAT.strip(),
         gaia_answer_format_requirements=GAIA_ANSWER_FORMAT_REQUIREMENTS.strip(),
         json_array_output_format=JSON_ARRAY_OUTPUT_FORMAT.strip(),
@@ -576,7 +585,8 @@ ${json_array_output_format}
 
 
 DECENTRALIZED_GRAPH_INSTRUCT = Template(
-    Template("""You are an AI workflow designer specialized in creating agent collaboration graphs for DECENTRALIZED multi-agent systems.
+    Template(
+        """You are an AI workflow designer specialized in creating agent collaboration graphs for DECENTRALIZED multi-agent systems.
 
 AVAILABLE MCP TOOLS:
 ${mcp_servers_desc}
@@ -717,7 +727,8 @@ ${json_object_response_format}
 
 OUTPUT FORMAT:
 ${json_object_output_format}
-""").safe_substitute(
+"""
+    ).safe_substitute(
         json_object_response_format=JSON_OBJECT_RESPONSE_FORMAT.strip(),
         json_object_output_format=JSON_OBJECT_OUTPUT_FORMAT.strip(),
     )
@@ -727,7 +738,8 @@ ${json_object_output_format}
 # ReAct MAS prompts
 
 REACT_POOL_INSTRUCT = Template(
-    Template("""
+    Template(
+        """
 You are an AI agent pool generator specialized in creating ReAct-based multi-agent systems.
 
 AVAILABLE MCP TOOLS:
@@ -858,7 +870,8 @@ OUTPUT FORMAT ENFORCEMENT:
 
 GAIA ANSWER FORMAT REQUIREMENTS (CRITICAL):
 ${gaia_answer_format_requirements}
-""").safe_substitute(
+"""
+    ).safe_substitute(
         json_array_response_format=JSON_ARRAY_RESPONSE_FORMAT.strip(),
         json_array_output_format=JSON_ARRAY_OUTPUT_FORMAT.strip(),
         gaia_answer_format_requirements=GAIA_ANSWER_FORMAT_REQUIREMENTS.strip(),
@@ -867,7 +880,8 @@ ${gaia_answer_format_requirements}
 
 
 REACT_GRAPH_INSTRUCT = Template(
-    Template("""
+    Template(
+        """
 You are an AI workflow designer specialized in creating execution graphs for ReAct-based multi-agent systems.
 
 AVAILABLE MCP TOOLS:
@@ -969,7 +983,8 @@ RULES:
 
 OUTPUT FORMAT:
 ${json_object_output_format}
-""").safe_substitute(
+"""
+    ).safe_substitute(
         json_object_response_format=JSON_OBJECT_RESPONSE_FORMAT.strip(),
         json_object_output_format=JSON_OBJECT_OUTPUT_FORMAT.strip(),
     )
@@ -977,7 +992,8 @@ ${json_object_output_format}
 
 
 UNIFIED_GEN_INSTRUCT = Template(
-Template("""You are an AI workflow designer specialized in creating complete agent collaboration systems.
+    Template(
+        """You are an AI workflow designer specialized in creating complete agent collaboration systems.
 You must design both the agent pool AND their workflow graph in a single, cohesive response.
 
 AVAILABLE MCP TOOLS:
@@ -1096,7 +1112,8 @@ Parallel processing (3 agents):
 
 OUTPUT FORMAT:
 ${json_object_output_format}
-""").safe_substitute(
+"""
+    ).safe_substitute(
         json_object_response_format=JSON_OBJECT_RESPONSE_FORMAT.strip(),
         json_object_output_format=JSON_OBJECT_OUTPUT_FORMAT.strip(),
     )

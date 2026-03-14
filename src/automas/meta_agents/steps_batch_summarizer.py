@@ -14,7 +14,9 @@ class StepsBatchSummaryItem(BaseModel):
     id: str = Field(description="Step id (given)")
     name: str = Field(description="Agent name (as it is in state representation)")
     role: str = Field(description="Agent role")
-    content_summary: str = Field(description="Concise summary of what happened in this step")
+    content_summary: str = Field(
+        description="Concise summary of what happened in this step"
+    )
 
 
 class StepsBatchSummaryOutput(BaseModel):
