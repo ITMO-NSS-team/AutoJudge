@@ -4,12 +4,12 @@ import json
 
 DB_NAME = "maseval"
 DB_USER = "postgres"
-DB_PASSWORD = ""  
+DB_PASSWORD = ""  # set to None if no password
 DB_HOST = "localhost"
 DB_PORT = 5432
 
 
-def check_table(table_name: str = "who_when", limit: int = 5):
+def check_table(table_name: str = "our_mas", limit: int = 5):
     """Checks the content of the specified table and prints the first few rows."""
     try:
         conn = psycopg2.connect(
@@ -43,4 +43,6 @@ def check_table(table_name: str = "who_when", limit: int = 5):
         print(f"Error: {e}")
 
 if __name__ == "__main__":
-    check_table()
+    check_table(
+        table_name="our_mas" # or who_when
+    )

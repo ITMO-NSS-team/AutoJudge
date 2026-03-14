@@ -298,6 +298,69 @@ ${json_array_output_format}
 )
 
 
+DEFAULT_POOL_INSTRUCT_EXTENDED_WW = Template(
+    Template("""
+You are an AI judge pool generator specialized in creating evaluation pipelines for multi-agent systems.
+Your goal is to design a team of specialized judges that detect problems, errors, and quality issues in system execution.
+
+DESIGN PRINCIPLES:
+- START SIMPLE: Create the minimum number of judges needed to detect key problems
+- Prefer 3-9 specialized judges that cover different error domains
+- Add more judges only when:
+  * Independent problem categories can be assessed in parallel (e.g., API errors vs environment setup)
+  * Different quality dimensions need separate evaluation (correctness, efficiency, reliability)
+  * Specific failure modes require dedicated detection logic
+- Avoid over-engineering: one comprehensive problem detector > multiple narrow similar judges
+
+RESPONSE FORMAT:
+${json_array_response_format}
+
+YOU CAN FOLLOW NEXT TAXONOMY:
+${taxonomy}
+
+EXAMPLES:
+${examples}
+
+RULES:
+- Ensure all judge names are unique and descriptive (end with _JUDGE)!
+- You should always ask judges to use tool (get_content_tool) to recive a context (1 or 2 times per judge)!
+- Instructions must include explicit scoring criteria (ideal/fair/poor)
+- Each judge returns JSON with justification + score
+- Focus judges on detecting specific problem categories: task failures, API errors, setup issues, tool misuse, etc.
+- Include TOOL_SELECTION_JUDGE or TOOL_PERFORMANCE_JUDGE when evaluating tool-based systems
+- Always include both GUILTY_AGENT_FINDER and STEP_OF_ERROR_FINDER judges that will be used to find the most guilty agent and the step where this agent failed
+- Always include FINAL_AGGREGATOR as the final judge that synthesizes all findings into binary score (poor/ideal) and justification
+
+**CRITICAL: TOOLS:**
+Force the court to use tools! Be sure to specify in the prompt that they should call the tool!!! But, FINAL_AGGREGATOR should not use tools!
+
+**ATTENTION CRITICAL: GUILTY_AGENT_FINDER AND STEP_OF_ERROR_FINDER USAGE:**
+Don't ignore `GUILTY_AGENT_FINDER` or `STEP_OF_ERROR_FINDER` judges! They both always must be in the pool to find the most guilty agent and the step where this agent failed!
+
+**ATTENTION CRITICAL: GUILTY_AGENT_FINDER AND STEP_OF_ERROR_FINDER OUTPUT FORMAT:**
+`GUILTY_AGENT_FINDER` must return only guilty agent name and justification (nothing else!)
+`STEP_OF_ERROR_FINDER` must return only step of an error and justification (nothing else!)
+
+**ATTENTION CRITICAL: GUILTY_AGENT_FINDER AND STEP_OF_ERROR_FINDER NAMES:**
+GUILTY_AGENT_FINDER and STEP_OF_ERROR_FINDER must be named exactly "GUILTY_AGENT_FINDER" and "STEP_OF_ERROR_FINDER" (case-sensitive)
+
+**ATTENTION CRITICAL: FINAL_AGGREGATOR NAME:**
+FINAL_AGGREGATOR must be named exactly "FINAL_AGGREGATOR" (case-sensitive)
+
+**ATTENTION CRITICAL: FINAL_AGGREGATOR OUTPUT FORMAT:**
+FINAL_AGGREGATOR must include these exact instructions at the end (it is important that it has the same output format as indicated below)):
+
+${judge_output_format}
+
+OUTPUT FORMAT:
+${json_array_output_format}
+""").safe_substitute(
+        json_array_response_format=JSON_ARRAY_RESPONSE_FORMAT.strip(),
+        json_array_output_format=JSON_ARRAY_OUTPUT_FORMAT.strip(),
+    )
+)
+
+
 DEFAULT_GRAPH_INSTRUCT = Template(
     Template("""
 You are an AI workflow designer specialized in creating evaluation pipelines for multi-agent systems.
@@ -316,6 +379,7 @@ DESIGN PRINCIPLES:
 - When in doubt, choose the simpler workflow that still catches all major issues
 - FINAL_AGGREGATOR must ALWAYS be present as the final terminal node that synthesizes all findings
 - All evaluation paths must eventually lead to FINAL_AGGREGATOR for final problem assessment
+- If GUILTY_AGENT_FINDER and STEP_OF_ERROR_FINDER are present in the pool, they must be ordered exactly like this: GUILTY_AGENT_FINDER -> STEP_OF_ERROR_FINDER
 
 RESPONSE FORMAT:
 ${json_object_response_format}
@@ -329,6 +393,8 @@ RULES:
 - FINAL_AGGREGATOR must be the single terminal node that receives all evaluation results
 - Avoid circular dependencies (DAG - Directed Acyclic Graph)
 - Return ONLY the JSON object, no additional text
+
+CRITICAL: USE ONLY NAMES OF THE JUDGES WHICH ARE IN THE POOL! DON'T USE ANY OTHER NAMES!
 
 EXAMPLES:
 
@@ -1085,4 +1151,63 @@ Analyze the multi-agent system execution trace and create a concise summary.
 }
 
 Keep descriptions concise. Extract ALL steps from trace.
+"""
+
+
+# prompt for summarizing whole trace at once
+STEP_BY_STEP_SUMMARIZATION_PROMPT = """
+Analyze the multi-agent system execution trace and produce a step-by-step summary.
+
+You will be given a `TRACE_ID` above the trace. You MUST use it when forming step ids.
+
+**REQUIRED OUTPUT:**
+
+- Extract ALL steps chronologically.
+- Each step must include:
+  - `id`: step id in the format `<trace_id>_<step>` (e.g., `abc123_1`)
+  - `name`: agent name (or "System" if unclear)
+  - `role`: agent role (best-effort; "Unknown" if unclear)
+  - `content_summary`: concise summary of what happened in this step
+
+**JSON OUTPUT FORMAT (return ONLY this JSON):**
+
+{
+  "step_by_step_summary": [
+    {
+      "id": "<trace_id>_1",
+      "name": "string",
+      "role": "string",
+      "content_summary": "string"
+    }
+  ]
+}
+
+Keep `content_summary` concise and factual. Do not add extra top-level keys.
+"""
+
+
+# prompt for summarizing a batch of states at once
+STEPS_BATCH_SUMMARIZATION_PROMPT = """
+Analyze a batch of multi-agent system execution steps and produce a summary for each one.
+
+You will receive one or more states, each preceded by a delimiter line:
+  --- state_id: <VALUE> ---
+You may also receive a **summary of previous states** — use it only as context to better understand the current batch; do NOT re-summarize those earlier states.
+
+**REQUIRED OUTPUT:**
+
+For **every** provided state produce exactly one summary entry containing:
+  - `id`: copy the `state_id` value from the delimiter line **character-for-character**. Example: if the delimiter says `--- state_id: abc123_7 ---`, the `id` MUST be `abc123_7`. NEVER substitute the agent name or any other string.
+  - `name`: the agent's name as it appears in the state, WITHOUT any numeric suffix. For example if the state mentions "VideoSearchAgent" in step 5, the name is "VideoSearchAgent", NOT "VideoSearchAgent_5".
+  - `role`: the message role as it appears in the state (e.g. "system", "user", "assistant", "tool"). Use "Unknown" only if truly unclear.
+  - `content_summary`: concise, factual summary of what happened in this step.
+
+Return the entries in the same order as the input states.
+
+**RULES**:
+* Produce exactly one summary per input state — no more, no less.
+* `id` MUST be the exact `state_id` from the delimiter. Do NOT invent, modify, or derive IDs from agent names.
+* `name` MUST be the bare agent name without step/index suffixes.
+* DO NOT re-summarize states from the previous summary. Only summarize the states listed under "States to summarize".
+* Keep `content_summary` concise and factual.
 """
