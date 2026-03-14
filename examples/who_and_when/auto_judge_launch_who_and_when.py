@@ -223,6 +223,7 @@ Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
   }
 ]"""
 
+
 def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
     graph_dict = {}
     _agents_info = agent_pool.full_agents_data
@@ -236,7 +237,9 @@ def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
     return graph_dict
 
 
-async def main(save_folder: str, df, df_summary):
+async def main(
+    save_folder: str, df, df_summary, table_name: str, num_traces: int | None = None
+):
     logger.info(f"===Starting Who&When evaluation===")
 
     pool_gen = PoolGenerator(
@@ -266,17 +269,18 @@ async def main(save_folder: str, df, df_summary):
                     if line.startswith("Task ID:"):
                         failed_traces_ids.append(line.split(":")[1].strip())
 
+    if num_traces is not None:
+        df = df[:num_traces]
+
     for idx in range(len(df)):
-        id = df.iloc[idx]["question_ID"] 
+        id = df.iloc[idx]["question_ID"]
         if id in done_traces:
             question_id = id
             logger.info(f"Task {question_id} already processed, skipping...")
             continue
 
         if id in failed_traces_ids:
-            logger.info(
-                f"Task {id} already failed, skipping..."
-            )
+            logger.info(f"Task {id} already failed, skipping...")
             continue
 
         task = id
@@ -308,6 +312,7 @@ async def main(save_folder: str, df, df_summary):
             judge_input = {
                 "query": encode(trace_data["question"]),
                 "history_for_evaluating": str(q),
+                "table_name": table_name,
             }
 
             logger.info("Generating judge pool...")
@@ -341,9 +346,7 @@ async def main(save_folder: str, df, df_summary):
                     }
                 )
 
-                print(
-                    f"\n!  Failed task {idx + 1}/{len(df)}: {id}"
-                )
+                print(f"\n!  Failed task {idx + 1}/{len(df)}: {id}")
                 print(f"   Error: {error_msg}\n")
                 continue
 
@@ -366,9 +369,7 @@ async def main(save_folder: str, df, df_summary):
                 },
                 metadata=trace_metadata,
             ) as span:
-                judge_client.update_current_trace(
-                    tags=["test", f"task_id:{id}"]
-                )
+                judge_client.update_current_trace(tags=["test", f"task_id:{id}"])
 
                 logger.info("Executing evaluation pipeline...")
                 result, trace_id = await ainvoke_with_lf(
@@ -379,7 +380,9 @@ async def main(save_folder: str, df, df_summary):
                 span.update(output={"result": result, "trace_id": trace_id})
                 span.end()
 
-            result_dict = json.loads(result.replace("```json", "").replace("```", "").strip())
+            result_dict = json.loads(
+                result.replace("```json", "").replace("```", "").strip()
+            )
 
             serializable_results["summarizer_score"] = {
                 "metric_name": "summarizer_score",
@@ -431,35 +434,28 @@ async def main(save_folder: str, df, df_summary):
             print(f"   Error: {error_msg}\n")
             continue
 
-        output_dir = local_results_dir
-        output_dir.mkdir(parents=True, exist_ok=True)
-        failed_file = output_dir / "failed_traces.txt"
+    output_dir = local_results_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    failed_file = output_dir / "failed_traces.txt"
 
-        if failed_traces_ids:
-            with open(failed_file, "w") as f:
+    if failed_traces:
+        first_run = not failed_file.exists()
+        with open(failed_file, "a") as f:
+            if first_run:
                 f.write(f"Failed traces: {len(failed_traces)} out of {len(df)}\n")
                 f.write("=" * 80 + "\n\n")
 
-                for failed in failed_traces:
-                    f.write(f"Task ID: {failed['task_id']}\n")
-                    f.write(f"Index: {failed['task_index']}/{len(df)}\n")
-                    f.write(f"Error Type: {failed['error_type']}\n")
-                    f.write(f"Error Message: {failed['error']}\n")
-                    f.write("-" * 80 + "\n\n")
-        else:
-            if failed_traces:
-                with open(failed_file, "w") as f:
-                    for failed in failed_traces:
-                        f.write(f"Task ID: {failed['task_id']}\n")
-                        f.write(f"Index: {failed['task_index']}/{len(df)}\n")
-                        f.write(f"Error Type: {failed['error_type']}\n")
-                        f.write(f"Error Message: {failed['error']}\n")
-                        f.write("-" * 80 + "\n\n")
+            for failed in failed_traces:
+                f.write(f"Task ID: {failed['task_id']}\n")
+                f.write(f"Index: {failed['task_index']}/{len(df)}\n")
+                f.write(f"Error Type: {failed['error_type']}\n")
+                f.write(f"Error Message: {failed['error']}\n")
+                f.write("-" * 80 + "\n\n")
 
-        if len(failed_traces) > 0:
-            logger.warning(
-                f"\n!  {len(failed_traces)} traces failed. Details saved to: {failed_file}\n"
-            )
+    if len(failed_traces) > 0:
+        logger.warning(
+            f"\n!  {len(failed_traces)} traces failed. Details saved to: {failed_file}\n"
+        )
 
     if failed_traces_ids:
         logger.info(
@@ -472,27 +468,30 @@ async def main(save_folder: str, df, df_summary):
 
 
 if __name__ == "__main__":
-    # df_handcrafted = pd.read_parquet(
-    #     "hf://datasets/Kevin355/Who_and_When/Hand-Crafted.parquet"
-    # )
-    df_algorithm = pd.read_parquet(
-        "hf://datasets/Kevin355/Who_and_When/Algorithm-Generated.parquet"
+    # handcrafted dataset
+    df_handcrafted = pd.read_parquet(
+        "hf://datasets/Kevin355/Who_and_When/Hand-Crafted.parquet"
     )
-    directory = Path("/Users/alina/Desktop/ITMO/AutoJudge/examples/who_and_when/algo_summary")
-    
+    # or llm-generated dataset
+    # df_algorithm = pd.read_parquet(
+    #     "hf://datasets/Kevin355/Who_and_When/Algorithm-Generated.parquet"
+    # )
+    summaries_directory = Path("path to who_and_when summaries")
+
     summary = []
-    for dir in directory.iterdir():
+    for dir in summaries_directory.iterdir():
         if dir.is_file() and dir.suffix == ".json":
             with open(dir, "r") as f:
                 data = json.load(f)
-                print(f"Data from {dir.name}: {data}")
                 summary.append([data, dir.name.split(".")[0]])
     df_summary = pd.DataFrame(summary, columns=["summary", "question_ID"])
 
     asyncio.run(
         main(
-            save_folder="db_tool_algo",
-            df=df_algorithm,
-            df_summary=df_summary
+            save_folder="test",
+            df=df_handcrafted,
+            df_summary=df_summary,
+            table_name="who_when",
+            # num_traces=30,
         )
     )

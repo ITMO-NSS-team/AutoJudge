@@ -4,12 +4,12 @@ import json
 
 DB_NAME = "maseval"
 DB_USER = "postgres"
-DB_PASSWORD = ""  
+DB_PASSWORD = ""  # set to None if no password
 DB_HOST = "localhost"
 DB_PORT = 5432
 
 
-def check_table(table_name: str = "who_when", limit: int = 5):
+def check_table(table_name: str = "our_mas", limit: int = 5):
     """Checks the content of the specified table and prints the first few rows."""
     try:
         conn = psycopg2.connect(
@@ -17,7 +17,7 @@ def check_table(table_name: str = "who_when", limit: int = 5):
             user=DB_USER,
             password=DB_PASSWORD,
             host=DB_HOST,
-            port=DB_PORT
+            port=DB_PORT,
         )
         cur = conn.cursor()
 
@@ -25,7 +25,10 @@ def check_table(table_name: str = "who_when", limit: int = 5):
         total = cur.fetchone()[0]
         print(f"Found rows {table_name}: {total}")
 
-        cur.execute(f"SELECT id, state_id, state_index, content FROM {table_name} LIMIT %s;", (limit,))
+        cur.execute(
+            f"SELECT id, state_id, state_index, content FROM {table_name} LIMIT %s;",
+            (limit,),
+        )
         rows = cur.fetchall()
 
         print(f"\nFirst {limit} rows:")
@@ -34,7 +37,9 @@ def check_table(table_name: str = "who_when", limit: int = 5):
             print(f"\nid: {id_val}")
             print(f"state_id: {state_id}")
             print(f"state_index: {state_index}")
-            print(f"content: {json.dumps(content, indent=2, ensure_ascii=False)[:200]}...")
+            print(
+                f"content: {json.dumps(content, indent=2, ensure_ascii=False)[:200]}..."
+            )
 
         cur.close()
         conn.close()
@@ -42,5 +47,6 @@ def check_table(table_name: str = "who_when", limit: int = 5):
     except Exception as e:
         print(f"Error: {e}")
 
+
 if __name__ == "__main__":
-    check_table()
+    check_table(table_name="our_mas")  # or who_when

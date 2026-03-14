@@ -8,8 +8,8 @@ from automas.mcp.registry import get_server_descriptions
 from automas.pipeline.node import AgentNode
 from automas.utils import get_logger
 
-from .base import DEFAULT_MODEL, BaseMetaAgent
-from .prompt_registry import DEFAULT_POOL_INSTRUCT_EXTENDED
+from .base import BaseMetaAgent
+from .prompt_registry import DEFAULT_POOL_INSTRUCT_EXTENDED_WW
 
 logger = get_logger()
 
@@ -21,10 +21,10 @@ class AgentSchema(BaseModel):
     model: str = os.getenv("AGENT_NODE_MODEL", "google/gemini-2.5-flash")
 
 
-class PoolGenerator(BaseMetaAgent):
+class PoolGenerator_WW(BaseMetaAgent):
     def __init__(
         self,
-        model: str = os.getenv("POOL_GEN_MODEL", "google/gemini-2.5-flash"),
+        model: str = os.getenv("POOL_GEN_MODEL", "google/gemini-3-flash-preview"),
         temperature: float = 0.3,
         output_schema: str = "",
         taxonomy: str = "",
@@ -43,7 +43,7 @@ class PoolGenerator(BaseMetaAgent):
 
     def _get_system_prompt(self) -> str:
         mcp_servers_desc = get_server_descriptions()
-        return DEFAULT_POOL_INSTRUCT_EXTENDED.substitute(
+        return DEFAULT_POOL_INSTRUCT_EXTENDED_WW.substitute(
             mcp_servers_desc=mcp_servers_desc,
             taxonomy=self.taxonomy,
             judge_output_format=self.schema,

@@ -1,63 +1,71 @@
+"""Launches auto-judge on who_and_when dataset with a pool that has 3 fixed agents: GUILTY_AGENT_FINDER and STEP_OF_ERROR_FINDER."""
+
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import asyncio
-
-from automas.meta_agents import PoolGenerator
-from automas.agent_pool import AgentPool
-from automas.pipeline.types import GraphDict
-from automas.pipeline import PipelineBuilder
-from automas.utils.langfuse_utils import ainvoke_with_lf
-from automas.utils import get_logger
-from maseval import get_langfuse_download_client, get_langfuse_judge_client
-from maseval.parsers.langfuse_parser_v3 import parse_langfuse_task
-from dotenv import load_dotenv
-import json
 import os
-import pandas as pd
+from dotenv import load_dotenv
 
 load_dotenv(".env")
+
+from automas.meta_agents import PoolGenerator_WW
+from automas.pipeline import PipelineBuilder
+from automas.meta_agents import GraphGenerator
+from automas.utils.langfuse_utils import ainvoke_with_lf
+from automas.utils import get_logger
+from maseval import get_langfuse_judge_client
+import json
+import pandas as pd
+from toon_format import encode
+
 logger = get_logger(__name__)
 
 taxonomy = """
-**LLM Metrics (11 total)** - Input scores may be "ideal", "fair" or "poor":
-- Overall score domain: {"ideal", "poor"}
-- OBSERVATION_ALIGNMENT
-- STATE_CONSISTENCY
-- MAS_COMPLEXITY
-- MAS_TASK_TRANSFER
-- MAS_ROLES_DISTRIBUTION
-- TASK_COMPLETENESS
-- TOOL_SELECTION
-- TOOL_PARAMETER_EXTRACTION
-- MAS_TASK_COMPLETION
-- MAS_PLANNING
-- POLICY_ALIGNMENT
+1) Guilty agent
+2) Step of error
 """
-output_schema = """**OUTPUT FORMAT - STRICTLY REQUIRED:**
-You MUST return ONLY a valid JSON object with exactly these two fields:
+
+output_schema = """
+**OUTPUT FORMAT - STRICTLY REQUIRED:**
+You must determine the most guilty agent in the evaluated 'history_for_evaluating', based on what the other judges wrote. You MUST return ONLY a valid JSON object with exactly these three fields:
 {
-  \"score\": \"ideal or poor\",
-  \"justification\": \"string\"
+  "agent": "Guilty Agent name from trace here",
+  "step": "integer number (1, 2, 3...) of the message in trace sequence",
+  "reason": "reason of your prediction"
 }
 
 **CRITICAL RULES:**
 - Return ONLY the JSON object, nothing else
 - NO markdown code fences (no ```json or ```)
 - NO explanatory text before or after the JSON
-- NO additional fields (no confidence, no metadata)
-- score must be exactly \"ideal\" or \"poor\" (lowercase)
-- justification must be a single string (concise, 1-3 sentences)
+- NO additional fields (no score, no confidence, no metadata)
+- agent must be the exact agent name as it appears in the trace
+- step must be a plain integer string: "1", "2", "3", etc.
+
+**STEP RULE:** This is the sequential position of the message in 'history_for_evaluating' (1 = first message, 2 = second message, etc). Use ONLY integers. Do NOT use IDs, UUIDs, strings, or any other identifiers.
 
 **VALID EXAMPLE:**
-{\"score\": \"ideal\", \"justification\": \"System demonstrates strong performance across all metrics.\"}
+{
+  "agent": "File_Surfer",
+  "step": "1", 
+  "reason": "The agent fails to collect price data for the daily tickets and season passes for California's Great America in 2024."
+}
 
-**INVALID EXAMPLES:**
-- ```json{\"score\": \"ideal\"}```  ← NO markdown fences
-- Here is my assessment: {\"score\": \"ideal\"}  ← NO extra text
-- {\"score\": \"IDEAL\"}  ← must be lowercase"""
+
+INVALID EXAMPLES (DO NOT USE THIS FORMAT):
+```json
+{
+  "agent": "Orchestrator",
+  "step": "21",
+  "reason": "The Orchestrator is the most guilty agent. Despite the WebSurfer's repeated failures to find clear Vudu listings for 'The Tenant' and 'Nosferatu the Vampyre' (as noted in steps 13 and 17), and the subsequent 'ResponsibleAIPolicyViolation' error in step 21, the Orchestrator still allowed the final answer to be 'The Tenant' without any verified evidence of its availability on Vudu. This indicates a failure in the Orchestrator's decision-making process to ensure all constraints were met before providing a final answer. The Orchestrator also repeatedly asked the WebSurfer to check for Vudu availability without changing its strategy, indicating a lack of progress and looping, as highlighted by the Search Integrity Judge."
+}
+```
+
+**INVALID STEP EXAMPLES:** "step1", "abc-123", "task_id_45", "first" — ONLY USE: "1", "2", "3", etc.
+"""
 
 examples = """
 Example 1 - MAS Task Completion Evaluation:
@@ -74,13 +82,15 @@ Evaluate whether the multi-agent system fully completed the user's task by asses
 4. *Actionability* - Can the user act on outputs to achieve their goal?
 5. *Efficiency* - Were tasks completed without unnecessary duplication?
 
+You must use the available tools at least once!
+
 **Scoring**:
 - \"ideal\": Task fully achieved, all subtasks addressed, outputs consistent and actionable
 - \"fair\": Task largely achieved but minor omissions or slight inconsistencies
 - \"poor\": Task failed, critical steps missing, inconsistent or unusable outputs
 
 Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": []
+    "mcp_tools": [get_content_tool]
   }
 ]
 
@@ -96,13 +106,15 @@ Evaluate complexity and interconnectedness of the multi-agent system.
 2. *Interconnection Quality* - Are agent connections well-designed and efficient?
 3. *System Scalability* - Can architecture accommodate growth and maintainability?
 
+You must use the available tools at least once!
+
 **Scoring**:
 - \"ideal\": Complexity perfectly balanced with optimal density and connections
 - \"fair\": Complexity manageable but has scalability or efficiency issues
 - \"poor\": Complexity poorly managed with density or connection problems
 
 Return single JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": []
+    "mcp_tools": [get_content_tool]
   }
 ]
 
@@ -119,13 +131,15 @@ Assess whether tools successfully fulfilled user requests by evaluating executio
 3. *Clarity* - Is output clear, structured, and in expected format?
 4. *Failure Handling* - Any errors or unrelated information returned?
 
+You must use the available tools at least once!
+
 **Scoring** (strict - zero tolerance for errors):
 - \"ideal\": Output perfectly solves task, all parts correct and complete
 - \"fair\": Output mostly correct but minor issues or omissions
 - \"poor\": Output fails task, incorrect, incomplete, or misleading
 
 Return JSON list: [{\"state_id\": \"...\", \"justification\": \"...\", \"score\": \"ideal|fair|poor\"}]",
-    "mcp_tools": []
+    "mcp_tools": [get_content_tool]
   }
 ]
 
@@ -144,6 +158,7 @@ Analyze execution trace to identify environment setup and configuration errors t
 3. *Environment Variables* - Missing or invalid env vars (os.environ KeyError)
 4. *Config Files* - Missing or malformed configs (FileNotFoundError, JSONDecodeError)
 5. *Dependencies* - Import errors or version conflicts (ModuleNotFoundError)
+You must use the available tools at least once!
 
 **Out of Scope**: HTTP status codes (401, 403, 429, 500), runtime API errors, network timeouts
 
@@ -153,7 +168,7 @@ Analyze execution trace to identify environment setup and configuration errors t
 - \"poor\": Critical setup errors prevented system startup
 
 Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": []
+    "mcp_tools": [get_content_tool]
   }
 ]
 
@@ -165,6 +180,7 @@ Example 5 - API Issues Detection:
 Analyze execution trace to identify API-related errors during RUNTIME execution.
 
 **Scope**: Focus on runtime API communication errors, NOT initialization/config errors.
+You must use the available tools at least once!
 
 **Evaluation Criteria** - Look for trace entries showing:
 1. *Rate Limiting* - HTTP 429, "Rate limit exceeded" (RateLimitError)
@@ -184,52 +200,43 @@ Analyze execution trace to identify API-related errors during RUNTIME execution.
 Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
     "mcp_tools": []
   }
+]
+
+Example 6 - Tool Selection Evaluation:
+[
+  {
+    "name": "TOOL_SELECTION_JUDGE",
+    "instructions": "**Instruction**:
+Assess whether tool selections made by the agent are appropriate for the task.
+
+**Evaluation Criteria**:
+1. *Tool Relevance* - Does the selected tool directly address the node_role responsibility?
+2. *Pipeline Position* - Is the tool suitable given the agent's position in the pipeline?
+3. *Justification* - Is the tool selection clearly supported by the task requirements?
+
+**Scoring**:
+- \"ideal\": Tool selection perfectly matches node_role and is clearly justified
+- \"fair\": Selection is relevant but potentially suboptimal for the task
+- \"poor\": Selection is inappropriate or clearly mismatched to node_role
+
+Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "mcp_tools": []
+  }
 ]"""
 
 
-def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
-    graph_dict = {}
-    _agents_info = agent_pool.full_agents_data
-
-    for agent in _agents_info:
-        if agent["name"] != "FINAL_AGGREGATOR":
-            graph_dict[agent["name"]] = ["FINAL_AGGREGATOR"]
-
-    graph_dict["FINAL_AGGREGATOR"] = []
-
-    return graph_dict
-
-
 async def main(
-    name: str,
-    save_folder: str,
-    df_summary,
-    table_name: str,
-    num_traces: int | None = None,
+    save_folder: str, df, df_summary, table_name: str, num_traces: int | None = None
 ):
-    logger.info(f"Starting AutoMAS evaluation for task name: {name}")
+    logger.info(f"===Starting Who&When evaluation===")
 
-    pool_gen = PoolGenerator(
+    pool_gen = PoolGenerator_WW(
         output_schema=output_schema, taxonomy=taxonomy, examples=examples
     )
-    lf = get_langfuse_download_client()
+    graph_gen = GraphGenerator()
+
     judge_client = get_langfuse_judge_client()
-    logger.info("Initialized generators and Langfuse clients")
-
-    traces_page1 = lf.api.trace.list(name=name, limit=50, page=1)
-    traces_page2 = lf.api.trace.list(name=name, limit=50, page=2)
-    traces_page3 = lf.api.trace.list(name=name, limit=50, page=3)
-    traces_page4 = lf.api.trace.list(name=name, limit=50, page=4)
-
-    all_traces = (
-        traces_page1.data + traces_page2.data + traces_page3.data + traces_page4.data
-    )
-    task_ids = [item.id for item in all_traces]
-
-    if not task_ids:
-        raise ValueError(f"No tasks found in trace {name}")
-
-    print(f"Found {len(task_ids)} tasks in trace {name}")
+    logger.info("Initialized generators and Langfuse client")
 
     # continue processing that was already started
     done_traces = []
@@ -238,9 +245,8 @@ async def main(
 
     if results_dir.exists():
         for res in os.listdir(results_dir):
-            if res.endswith(".json"):
-                res_cropped = res.split(".")[0]
-                done_traces.append(res_cropped)
+            res_cropped = res.split(".")[0]
+            done_traces.append(res_cropped)
 
     # skip failed traces
     failed_traces_ids = []
@@ -254,54 +260,47 @@ async def main(
                         failed_traces_ids.append(line.split(":")[1].strip())
 
     if num_traces is not None:
-        task_ids = task_ids[:num_traces]
+        df = df[:num_traces]
 
-    for idx, task_id in enumerate(task_ids):
-        if task_id in done_traces:
-            logger.info(f"Task {task_id} already processed, skipping...")
+    for idx in range(len(df)):
+        id = df.iloc[idx]["question_ID"]
+        if id in done_traces:
+            question_id = id
+            logger.info(f"Task {question_id} already processed, skipping...")
             continue
 
-        if task_id in failed_traces_ids:
-            logger.info(f"Task {task_id} already failed, skipping...")
+        if id in failed_traces_ids:
+            logger.info(f"Task {id} already failed, skipping...")
             continue
 
-        logger.info(f"Processing task {idx + 1}/{len(task_ids)}: {task_id}")
+        task = id
+        logger.info(f"Processing task {idx + 1}/{len(df)}: {task}")
         serializable_results = {}
 
         try:
-            trace_data = lf.api.trace.get(task_id)
-            query = parse_langfuse_task(trace_data)
-            logger.debug(f"Parsed task query: {query.user_query[:100]}...")
-
-            trace_metadata = {"task_id": task_id}
-            if hasattr(trace_data, "output") and trace_data.output:
-                if "ground_truth" in trace_data.output:
-                    trace_metadata["ground_truth"] = trace_data.output["ground_truth"]
-                if "response" in trace_data.output:
-                    trace_metadata["mas_response"] = trace_data.output["response"]
-                if (
-                    "ground_truth" in trace_data.output
-                    and "response" in trace_data.output
-                ):
-                    trace_metadata["correct_answer"] = (
-                        trace_data.output["response"]
-                        == trace_data.output["ground_truth"]
-                    )
-                    logger.debug(f"Correct answer: {trace_metadata['correct_answer']}")
-
-            q = df_summary[df_summary["task_id"] == task_id]["summary"].values[0]
-            if q is None:
-                logger.error(f"Task {task_id} not found in summary dataframe")
-                continue
-
+            trace_data = {
+                "history": df.iloc[idx]["history"],
+                "question": df.iloc[idx]["question"],
+                "task_id": id,
+                "trace_id": id,
+            }
+            q = df_summary[df_summary["question_ID"] == id]["summary"].values[0]
             logger.debug(f"Parsed task query: {q}...")
 
-            # agent_states = [
-            #     state.model_dump(mode="json") for state in query.agent_states
-            # ]
+            trace_metadata = {
+                "task_id": trace_data["task_id"],
+                "trace_id": trace_data["trace_id"],
+            }
+
+            if "groundtruth" in df.iloc[idx].keys():
+                trace_metadata["ground_truth"] = df.iloc[idx]["groundtruth"]
+                trace_metadata["correct_answer"] = df.iloc[idx]["is_corrected"]
+            else:
+                trace_metadata["ground_truth"] = df.iloc[idx]["ground_truth"]
+                trace_metadata["correct_answer"] = df.iloc[idx]["is_correct"]
 
             judge_input = {
-                "query": query.user_query,
+                "query": encode(trace_data["question"]),
                 "history_for_evaluating": str(q),
                 "table_name": table_name,
             }
@@ -311,39 +310,60 @@ async def main(
             try:
                 attempts = 0
                 while attempts < 3:
+                    missing_agents = []
                     pool = await pool_gen.create_pool(judge_input)
                     agents_info = pool.full_agents_data
                     final_agent = any(
                         agent.get("name") == "FINAL_AGGREGATOR" for agent in agents_info
                     )
-                    if final_agent:
+                    guilty_agent_finder = any(
+                        agent.get("name") == "GUILTY_AGENT_FINDER"
+                        for agent in agents_info
+                    )
+                    step_of_error_finder = any(
+                        agent.get("name") == "STEP_OF_ERROR_FINDER"
+                        for agent in agents_info
+                    )
+
+                    if final_agent and guilty_agent_finder and step_of_error_finder:
+                        logger.info(f"Generated correct pool on {attempts + 1} attempt")
                         break
+                    else:
+                        missing_agents.append(
+                            "FINAL_AGGREGATOR" if not final_agent else ""
+                        )
+                        missing_agents.append(
+                            "GUILTY_AGENT_FINDER" if not guilty_agent_finder else ""
+                        )
+                        missing_agents.append(
+                            "STEP_OF_ERROR_FINDER" if not step_of_error_finder else ""
+                        )
+
                     attempts += 1
 
             except Exception as e:
-                error_msg = str(e)
-                safe_error_msg = error_msg.replace("{", "{{").replace("}", "}}")
                 logger.error(
-                    f"Error processing task {task_id}: {safe_error_msg}", exc_info=True
+                    f"Error processing task {id}: There are missing {missing_agents} agents in the pool",
+                    exc_info=True,
                 )
 
                 failed_traces.append(
                     {
-                        "task_id": task_id,
+                        "task_id": id,
                         "task_index": idx + 1,
                         "error": error_msg,
                         "error_type": type(e).__name__,
                     }
                 )
 
-                print(f"\n!  Failed task {idx + 1}/{len(task_ids)}: {task_id}")
+                print(f"\n!  Failed task {idx + 1}/{len(df)}: {id}")
                 print(f"   Error: {error_msg}\n")
                 continue
 
             logger.info(f"Created pool with {len(pool)} judges")
 
             logger.info("Generating evaluation graph...")
-            graph = get_parallel_graph(pool)
+            graph = await graph_gen.create_graph(pool, str(judge_input))
             logger.debug(f"Graph structure: {graph}")
 
             builder = PipelineBuilder()
@@ -352,16 +372,14 @@ async def main(
             logger.info(f"Built pipeline with {len(pipeline.execution_order)} nodes")
 
             with judge_client.start_as_current_span(
-                name=f"evaluate_task_{task_id}",
-                input={"task_id": task_id, "trace_id": task_id},
+                name=f"evaluate_task_{task}",
+                input={
+                    "task_id": id,
+                    "trace_id": id,
+                },
                 metadata=trace_metadata,
             ) as span:
-                judge_client.update_current_trace(
-                    tags=[
-                        "test",
-                        f"task_id:{task_id}",
-                    ]
-                )
+                judge_client.update_current_trace(tags=["test", f"task_id:{id}"])
 
                 logger.info("Executing evaluation pipeline...")
                 result, trace_id = await ainvoke_with_lf(
@@ -372,28 +390,30 @@ async def main(
                 span.update(output={"result": result, "trace_id": trace_id})
                 span.end()
 
-            result_clean = result.strip()
-            if result_clean.startswith("```"):
-                lines = result_clean.splitlines()
-                # drop first line (```json or ```) and last line (```)
-                result_clean = "\n".join(lines[1:-1]).strip()
-
-            result_dict = json.loads(result_clean)
+            result_dict = json.loads(
+                result.replace("```json", "").replace("```", "").strip()
+            )
 
             serializable_results["summarizer_score"] = {
                 "metric_name": "summarizer_score",
                 "scores": [
                     {
                         "item_id": "overall_score",
-                        "score": result_dict["score"],
-                        "justification": result_dict["justification"],
+                        "score": result_dict,
+                        "idx": idx,
+                        "task_id": id,
+                        "ground_truth": trace_metadata["ground_truth"],
+                        "correct_answer": str(trace_metadata["correct_answer"]),
+                        "gt_agent": df.iloc[idx]["mistake_agent"],
+                        "gt_step": df.iloc[idx]["mistake_step"],
+                        "gt_mistake_reason": df.iloc[idx]["mistake_reason"],
                     }
                 ],
             }
 
             output_dir = local_results_dir
             output_dir.mkdir(parents=True, exist_ok=True)
-            output_file = output_dir / Path(f"{task_id}.json")
+            output_file = output_dir / Path(f"{df.iloc[idx]['question_ID']}.json")
 
             with open(output_file, "w") as f:
                 json.dump(serializable_results, f, indent=2)
@@ -402,11 +422,11 @@ async def main(
 
             print(f"Result: {result}")
             print(f"Langfuse trace ID: {trace_id}")
-            print(f"Launch № {idx + 1} from {len(task_ids)}")
 
         except Exception as e:
             error_msg = str(e)
             safe_error_msg = error_msg.replace("{", "{{").replace("}", "}}")
+            task_id = id
             logger.error(
                 f"Error processing task {task_id}: {safe_error_msg}", exc_info=True
             )
@@ -420,27 +440,34 @@ async def main(
                 }
             )
 
-            print(f"\n!  Failed task {idx + 1}/{len(task_ids)}: {task_id}")
+            print(f"\n!  Failed task {idx + 1}/{len(df)}: {task_id}")
             print(f"   Error: {error_msg}\n")
             continue
 
     output_dir = local_results_dir
-    output_dir.mkdir(exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     failed_file = output_dir / "failed_traces.txt"
 
-    if failed_traces:
-        first_run = not failed_file.exists()
-        with open(failed_file, "a") as f:
-            if first_run:
-                f.write(f"Failed traces: {len(failed_traces)} out of {len(task_ids)}\n")
-                f.write("=" * 80 + "\n\n")
+    if failed_traces_ids:
+        with open(failed_file, "w") as f:
+            f.write(f"Failed traces: {len(failed_traces)} out of {len(df)}\n")
+            f.write("=" * 80 + "\n\n")
 
             for failed in failed_traces:
                 f.write(f"Task ID: {failed['task_id']}\n")
-                f.write(f"Index: {failed['task_index']}/{len(task_ids)}\n")
+                f.write(f"Index: {failed['task_index']}/{len(df)}\n")
                 f.write(f"Error Type: {failed['error_type']}\n")
                 f.write(f"Error Message: {failed['error']}\n")
                 f.write("-" * 80 + "\n\n")
+    else:
+        if failed_traces:
+            with open(failed_file, "w") as f:
+                for failed in failed_traces:
+                    f.write(f"Task ID: {failed['task_id']}\n")
+                    f.write(f"Index: {failed['task_index']}/{len(df)}\n")
+                    f.write(f"Error Type: {failed['error_type']}\n")
+                    f.write(f"Error Message: {failed['error']}\n")
+                    f.write("-" * 80 + "\n\n")
 
     if len(failed_traces) > 0:
         logger.warning(
@@ -449,16 +476,25 @@ async def main(
 
     if failed_traces_ids:
         logger.info(
-            f"Completed evaluation: {len(task_ids) - (len(failed_traces) + len(failed_traces_ids))}/{len(task_ids)} successful, {len(failed_traces) + len(failed_traces_ids)} failed"
+            f"Completed evaluation: {len(df) - (len(failed_traces) + len(failed_traces_ids))}/{len(df)} successful, {len(failed_traces) + len(failed_traces_ids)} failed"
         )
     else:
         logger.info(
-            f"Completed evaluation: {len(task_ids) - len(failed_traces)}/{len(task_ids)} successful, {len(failed_traces)} failed"
+            f"Completed evaluation: {len(df) - (len(failed_traces))}/{len(df)} successful, {len(failed_traces)} failed"
         )
 
 
 if __name__ == "__main__":
-    summaries_directory = Path("path to our_mas (GHOST) summaries")
+    # handcrafted dataset
+    df_handcrafted = pd.read_parquet(
+        "hf://datasets/Kevin355/Who_and_When/Hand-Crafted.parquet"
+    )
+    # or llm-generated dataset
+    # df_algorithm = pd.read_parquet(
+    #     "hf://datasets/Kevin355/Who_and_When/Algorithm-Generated.parquet"
+    # )
+
+    summaries_directory = Path("path to who_and_when summaries")
 
     summary = []
     for dir in summaries_directory.iterdir():
@@ -466,15 +502,14 @@ if __name__ == "__main__":
             with open(dir, "r") as f:
                 data = json.load(f)
                 summary.append([data, dir.name.split(".")[0]])
-    df_summary = pd.DataFrame(summary, columns=["summary", "task_id"])
+    df_summary = pd.DataFrame(summary, columns=["summary", "question_ID"])
 
     asyncio.run(
         main(
-            # name="gaia_task_db0c3ed0-a4af-4442-bb6f-884d6da055cb", # big mas
-            name="gaia_task_07aac7b1-ffc3-4787-8e4c-7fb522156097",  # small mas
             save_folder="test",
+            df=df_handcrafted[:],
             df_summary=df_summary,
-            table_name="our_mas",
+            table_name="who_when",
             # num_traces=30,
         )
     )
