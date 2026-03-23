@@ -128,7 +128,7 @@ Evaluate whether the multi-agent system fully completed the user's task by asses
 - \"fair\": Task largely achieved but minor omissions or slight inconsistencies
 - \"poor\": Task failed, critical steps missing, inconsistent or unusable outputs
 
-Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+Return JSON: {\"verdict\": \"ideal|fair|poor\", \"agent\": \"<judge_name>\", \"justification\": \"...\"}",
     "mcp_tools": []
   }
 ]
