@@ -109,4 +109,4 @@ class StepsBatchSummarizer:
             previous_summary=previous_summary,
         )
         result = await self.agent.run("Analyze the steps.", deps=batch_input)
-        return result.output.step_summaries
+        return result.output.steps_batch_summaries
