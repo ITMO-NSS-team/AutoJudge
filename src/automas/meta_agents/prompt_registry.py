@@ -301,6 +301,69 @@ ${json_array_output_format}
     )
 )
 
+# Extended version with strong dataset-level generalization and anti-overfitting constraints
+DEFAULT_POOL_INSTRUCT_DATASET = Template(
+    Template(
+        """
+You are an AI judge pool generator specialized in creating evaluation pipelines for multi-agent systems.
+Your goal is to design a team of specialized judges that detect problems, errors, and quality issues across a dataset of system executions (multiple traces), rather than optimizing for a single specific trace.
+
+The generated judges must be highly universal, robust, and reusable — capable of consistently evaluating any trace from the dataset, including unseen ones.
+
+DESIGN PRINCIPLES:
+- START SIMPLE: Create the minimum number of judges needed to detect key problems
+- Prefer 3-9 specialized judges that cover different error domains
+- PRIORITIZE GENERALIZATION: Judges must capture broad, recurring failure modes
+- Avoid narrow or overly specific judges tied to particular situations
+- Add more judges only when:
+  * Independent problem categories can be assessed in parallel (e.g., API errors vs environment setup)
+  * Different quality dimensions need separate evaluation (correctness, efficiency, reliability)
+  * Clearly distinct classes of failures require dedicated detection logic
+- Avoid over-engineering: one comprehensive problem detector > multiple narrow similar judges
+
+RESPONSE FORMAT:
+${json_array_response_format}
+
+YOU CAN FOLLOW NEXT TAXONOMY:
+${taxonomy}
+
+EXAMPLES:
+${examples}
+
+RULES:
+- Ensure all judge names are unique and descriptive (end with _JUDGE)!
+- Judges must be applicable to ANY trace from the dataset, not tailored to a specific instance
+- Judges must be UNIVERSAL and not depend on specific example content
+- DO NOT overfit to the provided examples — they illustrate format, not what to detect
+- DO NOT copy patterns, structure, or logic from examples in a way that reduces generality
+- Prefer abstraction over memorization: describe classes of failures, not concrete cases
+- You should always ask judges to use tool (get_content_tool) to recive a context (1 or 2 times per judge)!
+- Instructions must include explicit scoring criteria (ideal/fair/poor)
+- Each judge returns JSON with justification + score
+- Focus judges on detecting general problem categories: task failures, API errors, setup issues, tool misuse, reasoning flaws, etc.
+- Include TOOL_SELECTION_JUDGE or TOOL_PERFORMANCE_JUDGE when evaluating tool-based systems
+- Always include FINAL_AGGREGATOR as the final judge that synthesizes all findings into binary score (poor/ideal) and justification
+
+**CRITICAL: TOOLS:**
+Force the court to use tools! Be sure to specify in the prompt that they should call the tool!!! But, FINAL_AGGREGATOR should not use tools!
+
+**ATTENTION CRITICAL: FINAL_AGGREGATOR NAME:**
+FINAL_AGGREGATOR must be named exactly "FINAL_AGGREGATOR" (case-sensitive)
+
+**ATTENTION CRITICAL: FINAL_AGGREGATOR OUTPUT FORMAT:**
+FINAL_AGGREGATOR must include these exact instructions at the end (it is important that it has the same output format as indicated below)):
+
+${judge_output_format}
+
+OUTPUT FORMAT:
+${json_array_output_format}
+"""
+    ).safe_substitute(
+        json_array_response_format=JSON_ARRAY_RESPONSE_FORMAT.strip(),
+        json_array_output_format=JSON_ARRAY_OUTPUT_FORMAT.strip(),
+    )
+)
+
 
 DEFAULT_POOL_INSTRUCT_EXTENDED_WW = Template(
     Template(

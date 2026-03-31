@@ -6,7 +6,7 @@ from automas.pipeline.types import GraphDict
 from automas.utils.logger import get_logger
 
 from .base import DEFAULT_MODEL, BaseMetaAgent
-from .prompt_registry import DEFAULT_GRAPH_INSTRUCT
+from .prompt_registry import DEFAULT_GRAPH_INSTRUCT, DEFAULT_POOL_INSTRUCT_DATASET
 import os
 
 if TYPE_CHECKING:

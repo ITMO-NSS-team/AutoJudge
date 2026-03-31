@@ -9,7 +9,7 @@ from automas.pipeline.node import AgentNode
 from automas.utils import get_logger
 
 from .base import DEFAULT_MODEL, BaseMetaAgent
-from .prompt_registry import DEFAULT_POOL_INSTRUCT_EXTENDED
+from .prompt_registry import DEFAULT_POOL_INSTRUCT_EXTENDED, DEFAULT_POOL_INSTRUCT_DATASET
 
 logger = get_logger()
 
@@ -29,6 +29,8 @@ class PoolGenerator(BaseMetaAgent):
         output_schema: str = "",
         taxonomy: str = "",
         examples: str = "",
+        pool_per_dataset: bool = False
+
     ):
         print(
             f"Initializing PoolGenerator with model={model}, temperature={temperature}"
@@ -36,6 +38,8 @@ class PoolGenerator(BaseMetaAgent):
         self.schema = output_schema
         self.taxonomy = taxonomy
         self.examples = examples
+        self.pool_per_dataset = pool_per_dataset
+
         super().__init__(
             model=model,
             temperature=temperature,
@@ -43,6 +47,13 @@ class PoolGenerator(BaseMetaAgent):
 
     def _get_system_prompt(self) -> str:
         mcp_servers_desc = get_server_descriptions()
+        if self.pool_per_dataset:
+            return DEFAULT_POOL_INSTRUCT_DATASET.substitute(
+            mcp_servers_desc=mcp_servers_desc,
+            taxonomy=self.taxonomy,
+            judge_output_format=self.schema,
+            examples=self.examples,
+        )
         return DEFAULT_POOL_INSTRUCT_EXTENDED.substitute(
             mcp_servers_desc=mcp_servers_desc,
             taxonomy=self.taxonomy,
