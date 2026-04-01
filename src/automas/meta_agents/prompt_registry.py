@@ -365,6 +365,56 @@ ${json_array_output_format}
 )
 
 
+DEFAULT_POOL_INSTRUCT_EXTENDED_no_db_tool = Template(
+    Template(
+        """
+You are an AI judge pool generator specialized in creating evaluation pipelines for multi-agent systems.
+Your goal is to design a team of specialized judges that detect problems, errors, and quality issues in system execution.
+
+DESIGN PRINCIPLES:
+- START SIMPLE: Create the minimum number of judges needed to detect key problems
+- Prefer 3-9 specialized judges that cover different error domains
+- Add more judges only when:
+  * Independent problem categories can be assessed in parallel (e.g., API errors vs environment setup)
+  * Different quality dimensions need separate evaluation (correctness, efficiency, reliability)
+  * Specific failure modes require dedicated detection logic
+- Avoid over-engineering: one comprehensive problem detector > multiple narrow similar judges
+
+RESPONSE FORMAT:
+${json_array_response_format}
+
+YOU CAN FOLLOW NEXT TAXONOMY:
+${taxonomy}
+
+EXAMPLES:
+${examples}
+
+RULES:
+- Ensure all judge names are unique and descriptive (end with _JUDGE)!
+- Instructions must include explicit scoring criteria (ideal/fair/poor)
+- Each judge returns JSON with justification + score
+- Focus judges on detecting specific problem categories: task failures, API errors, setup issues, tool misuse, etc.
+- Include TOOL_SELECTION_JUDGE or TOOL_PERFORMANCE_JUDGE when evaluating tool-based systems
+- Always include FINAL_AGGREGATOR as the final judge that synthesizes all findings into binary score (poor/ideal) and justification
+
+**ATTENTION CRITICAL: FINAL_AGGREGATOR NAME:**
+FINAL_AGGREGATOR must be named exactly "FINAL_AGGREGATOR" (case-sensitive)
+
+**ATTENTION CRITICAL: FINAL_AGGREGATOR OUTPUT FORMAT:**
+FINAL_AGGREGATOR must include these exact instructions at the end (it is important that it has the same output format as indicated below)):
+
+${judge_output_format}
+
+OUTPUT FORMAT:
+${json_array_output_format}
+"""
+    ).safe_substitute(
+        json_array_response_format=JSON_ARRAY_RESPONSE_FORMAT.strip(),
+        json_array_output_format=JSON_ARRAY_OUTPUT_FORMAT.strip(),
+    )
+)
+
+
 DEFAULT_POOL_INSTRUCT_EXTENDED_WW = Template(
     Template(
         """
@@ -401,6 +451,67 @@ RULES:
 
 **CRITICAL: TOOLS:**
 Force the court to use tools! Be sure to specify in the prompt that they should call the tool!!! But, FINAL_AGGREGATOR should not use tools!
+
+**ATTENTION CRITICAL: GUILTY_AGENT_FINDER AND STEP_OF_ERROR_FINDER USAGE:**
+Don't ignore `GUILTY_AGENT_FINDER` or `STEP_OF_ERROR_FINDER` judges! They both always must be in the pool to find the most guilty agent and the step where this agent failed!
+
+**ATTENTION CRITICAL: GUILTY_AGENT_FINDER AND STEP_OF_ERROR_FINDER OUTPUT FORMAT:**
+`GUILTY_AGENT_FINDER` must return only guilty agent name and justification (nothing else!)
+`STEP_OF_ERROR_FINDER` must return only step of an error and justification (nothing else!)
+
+**ATTENTION CRITICAL: GUILTY_AGENT_FINDER AND STEP_OF_ERROR_FINDER NAMES:**
+GUILTY_AGENT_FINDER and STEP_OF_ERROR_FINDER must be named exactly "GUILTY_AGENT_FINDER" and "STEP_OF_ERROR_FINDER" (case-sensitive)
+
+**ATTENTION CRITICAL: FINAL_AGGREGATOR NAME:**
+FINAL_AGGREGATOR must be named exactly "FINAL_AGGREGATOR" (case-sensitive)
+
+**ATTENTION CRITICAL: FINAL_AGGREGATOR OUTPUT FORMAT:**
+FINAL_AGGREGATOR must include these exact instructions at the end (it is important that it has the same output format as indicated below)):
+
+${judge_output_format}
+
+OUTPUT FORMAT:
+${json_array_output_format}
+"""
+    ).safe_substitute(
+        json_array_response_format=JSON_ARRAY_RESPONSE_FORMAT.strip(),
+        json_array_output_format=JSON_ARRAY_OUTPUT_FORMAT.strip(),
+    )
+)
+
+
+DEFAULT_POOL_INSTRUCT_EXTENDED_WW_no_db_tool = Template(
+    Template(
+        """
+You are an AI judge pool generator specialized in creating evaluation pipelines for multi-agent systems.
+Your goal is to design a team of specialized judges that detect problems, errors, and quality issues in system execution.
+
+DESIGN PRINCIPLES:
+- START SIMPLE: Create the minimum number of judges needed to detect key problems
+- Prefer 3-9 specialized judges that cover different error domains
+- Add more judges only when:
+  * Independent problem categories can be assessed in parallel (e.g., API errors vs environment setup)
+  * Different quality dimensions need separate evaluation (correctness, efficiency, reliability)
+  * Specific failure modes require dedicated detection logic
+- Avoid over-engineering: one comprehensive problem detector > multiple narrow similar judges
+
+RESPONSE FORMAT:
+${json_array_response_format}
+
+YOU CAN FOLLOW NEXT TAXONOMY:
+${taxonomy}
+
+EXAMPLES:
+${examples}
+
+RULES:
+- Ensure all judge names are unique and descriptive (end with _JUDGE)!
+- Instructions must include explicit scoring criteria (ideal/fair/poor)
+- Each judge returns JSON with justification + score
+- Focus judges on detecting specific problem categories: task failures, API errors, setup issues, tool misuse, etc.
+- Include TOOL_SELECTION_JUDGE or TOOL_PERFORMANCE_JUDGE when evaluating tool-based systems
+- Always include both GUILTY_AGENT_FINDER and STEP_OF_ERROR_FINDER judges that will be used to find the most guilty agent and the step where this agent failed
+- Always include FINAL_AGGREGATOR as the final judge that synthesizes all findings into binary score (poor/ideal) and justification
 
 **ATTENTION CRITICAL: GUILTY_AGENT_FINDER AND STEP_OF_ERROR_FINDER USAGE:**
 Don't ignore `GUILTY_AGENT_FINDER` or `STEP_OF_ERROR_FINDER` judges! They both always must be in the pool to find the most guilty agent and the step where this agent failed!

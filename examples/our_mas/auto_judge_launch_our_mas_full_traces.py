@@ -9,17 +9,22 @@ from automas.meta_agents import PoolGenerator
 from automas.agent_pool import AgentPool
 from automas.pipeline.types import GraphDict
 from automas.pipeline import PipelineBuilder
-from automas.utils.langfuse_utils import ainvoke_with_lf
+from automas.pipeline.node_session import NodeExecution, NodeSessionError
 from automas.utils import get_logger
 from maseval import get_langfuse_download_client, get_langfuse_judge_client
 from maseval.parsers.langfuse_parser_v3 import parse_langfuse_task
 from dotenv import load_dotenv
 import json
 import os
-import pandas as pd
 
 load_dotenv(".env")
 logger = get_logger(__name__)
+
+POOL_GENERATION_ATTEMPTS = 3
+FINAL_AGENT_ONLY_ATTEMPTS = 8
+MISSING_DEPENDENCY_RECOVERY_ATTEMPTS = 3
+DEPENDENCY_NODE_ATTEMPTS = 5
+TRANSIENT_ERROR_RETRY_DELAY_SECONDS = 1.5
 
 taxonomy = """
 **LLM Metrics (11 total)** - Input scores may be "ideal", "fair" or "poor":
@@ -55,7 +60,6 @@ You MUST return ONLY a valid JSON object with exactly these two fields:
 {\"score\": \"ideal\", \"justification\": \"System demonstrates strong performance across all metrics.\"}
 
 **INVALID EXAMPLES:**
-- ```json{\"score\": \"ideal\"}```  ← NO markdown fences
 - Here is my assessment: {\"score\": \"ideal\"}  ← NO extra text
 - {\"score\": \"IDEAL\"}  ← must be lowercase"""
 
@@ -150,6 +154,7 @@ Analyze execution trace to identify environment setup and configuration errors t
 3. *Environment Variables* - Missing or invalid env vars (os.environ KeyError)
 4. *Config Files* - Missing or malformed configs (FileNotFoundError, JSONDecodeError)
 5. *Dependencies* - Import errors or version conflicts (ModuleNotFoundError)
+
 You must use the available tools at least once!
 
 **Out of Scope**: HTTP status codes (401, 403, 429, 500), runtime API errors, network timeouts
@@ -230,11 +235,257 @@ def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
     return graph_dict
 
 
+def build_history_for_evaluating(query) -> str:
+    if query.agent_states:
+        return json.dumps(
+            [state.model_dump(mode="json") for state in query.agent_states],
+            ensure_ascii=False,
+        )
+
+    if query.dialogue_history:
+        return json.dumps(
+            [message.model_dump(mode="json") for message in query.dialogue_history],
+            ensure_ascii=False,
+        )
+
+    if query.agent_responses:
+        return json.dumps(
+            [response.model_dump(mode="json") for response in query.agent_responses],
+            ensure_ascii=False,
+        )
+
+    return "[]"
+
+
+def is_transient_chat_completion_error(exc: Exception) -> bool:
+    message = str(exc)
+    return (
+        "Invalid response from openrouter chat completions endpoint" in message
+        and "validation errors for ChatCompletion" in message
+        and "input_value=None" in message
+    )
+
+
+def has_final_aggregator(pool: AgentPool) -> bool:
+    return any(agent.get("name") == "FINAL_AGGREGATOR" for agent in pool.full_agents_data)
+
+
+async def create_pool_with_retries(pool_gen: PoolGenerator, judge_input: dict) -> AgentPool:
+    context_feedback = None
+    attempt_errors: list[str] = []
+
+    for attempt in range(1, POOL_GENERATION_ATTEMPTS + 1):
+        try:
+            logger.info("Pool generation attempt %s/%s", attempt, POOL_GENERATION_ATTEMPTS)
+            pool = await pool_gen.create_pool(judge_input, context=context_feedback)
+
+            if has_final_aggregator(pool):
+                return pool
+
+            context_feedback = (
+                "Previous attempt was invalid: include FINAL_AGGREGATOR exactly named "
+                "'FINAL_AGGREGATOR' and return a non-empty list of valid agents."
+            )
+            attempt_errors.append(
+                f"attempt {attempt}/{POOL_GENERATION_ATTEMPTS}: missing FINAL_AGGREGATOR"
+            )
+
+        except Exception as exc:
+            if "No valid agents generated" in str(exc):
+                context_feedback = (
+                    "Previous attempt returned no valid agents. Return a non-empty list of "
+                    "valid agent schemas and include FINAL_AGGREGATOR exactly once."
+                )
+
+            attempt_errors.append(
+                f"attempt {attempt}/{POOL_GENERATION_ATTEMPTS}: {type(exc).__name__}: {str(exc)[:300]}"
+            )
+
+    error_block = "\n".join(f"- {err}" for err in attempt_errors)
+    raise RuntimeError(
+        "Pool generation failed after retries. Attempts:\n"
+        f"{error_block}"
+    )
+
+
+async def execute_node_with_retries(
+    pipeline,
+    node,
+    max_attempts: int,
+    node_input: str,
+) -> str:
+    last_error = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            agent = node.build_agent()
+            result = await agent.run(node_input)
+            node._usage = result.usage()
+            pipeline.node_session.add_node_execution(
+                NodeExecution(
+                    node_id=node.id,
+                    node_name=node.name,
+                    output=result.output,
+                )
+            )
+            return result.output
+        except Exception as exc:
+            last_error = exc
+            logger.warning(
+                "Node %s attempt %s/%s failed: %s",
+                node.name,
+                attempt,
+                max_attempts,
+                exc,
+            )
+
+            if is_transient_chat_completion_error(exc) and attempt < max_attempts:
+                await asyncio.sleep(TRANSIENT_ERROR_RETRY_DELAY_SECONDS * attempt)
+                continue
+
+            if attempt < max_attempts:
+                await asyncio.sleep(0.5)
+
+    raise RuntimeError(
+        f"Node {node.name} failed after {max_attempts} attempts: {type(last_error).__name__}: {last_error}"
+    ) from last_error
+
+
+async def recover_missing_dependencies_for_final(
+    pipeline,
+    max_rounds: int = MISSING_DEPENDENCY_RECOVERY_ATTEMPTS,
+) -> None:
+    final_node = pipeline.execution_order[-1]
+
+    for round_index in range(1, max_rounds + 1):
+        missing_parents = [
+            parent for parent in final_node.parents
+            if parent.id not in pipeline.node_session.node_executions
+        ]
+
+        if not missing_parents:
+            return
+
+        logger.warning(
+            "Dependency recovery round %s/%s for FINAL_AGGREGATOR. Missing parents: %s",
+            round_index,
+            max_rounds,
+            [parent.name for parent in missing_parents],
+        )
+
+        progressed = False
+        for parent_node in missing_parents:
+            try:
+                pipeline.node_session.validate_dependencies(parent_node)
+                parent_input = pipeline.node_session.get_input_for_node(parent_node)
+                await execute_node_with_retries(
+                    pipeline,
+                    parent_node,
+                    max_attempts=DEPENDENCY_NODE_ATTEMPTS,
+                    node_input=parent_input,
+                )
+                progressed = True
+            except NodeSessionError as dep_exc:
+                logger.warning(
+                    "Cannot execute missing parent %s yet due to unmet dependencies: %s",
+                    parent_node.name,
+                    dep_exc,
+                )
+            except Exception as parent_exc:
+                logger.warning(
+                    "Failed to recover missing parent %s: %s",
+                    parent_node.name,
+                    parent_exc,
+                )
+
+        if not progressed:
+            break
+
+    unresolved = [
+        parent.name for parent in final_node.parents
+        if parent.id not in pipeline.node_session.node_executions
+    ]
+    if unresolved:
+        raise RuntimeError(
+            "Could not recover FINAL_AGGREGATOR dependencies. "
+            f"Still missing: {unresolved}"
+        )
+
+
+async def run_final_agent_only_with_retries(
+    pipeline,
+    max_attempts: int = FINAL_AGENT_ONLY_ATTEMPTS,
+):
+    final_node = pipeline.execution_order[-1]
+    if final_node.name != "FINAL_AGGREGATOR":
+        raise RuntimeError(
+            f"Final node is '{final_node.name}', expected 'FINAL_AGGREGATOR'"
+        )
+
+    pipeline.node_session.validate_dependencies(final_node)
+    final_input = pipeline.node_session.get_input_for_node(final_node)
+    parent_names = [parent.name for parent in final_node.parents]
+    parent_status = [
+        f"{parent.name}:{'ready' if parent.id in pipeline.node_session.node_executions else 'missing'}"
+        for parent in final_node.parents
+    ]
+    input_preview = " ".join(final_input.split())[:300]
+
+    last_error = None
+    attempt_failures: list[str] = []
+    for attempt in range(1, max_attempts + 1):
+        try:
+            logger.warning(
+                "Running FINAL_AGGREGATOR only (attempt %s/%s)",
+                attempt,
+                max_attempts,
+            )
+            result_output = await execute_node_with_retries(
+                pipeline,
+                final_node,
+                max_attempts=1,
+                node_input=final_input,
+            )
+
+            logger.info(
+                "FINAL_AGGREGATOR succeeded on attempt %s/%s",
+                attempt,
+                max_attempts,
+            )
+            return result_output
+
+        except Exception as exc:
+            last_error = exc
+            failure_summary = (
+                f"attempt {attempt}/{max_attempts}: "
+                f"{type(exc).__name__}: {str(exc)[:500]}"
+            )
+            attempt_failures.append(failure_summary)
+            logger.warning(
+                "FINAL_AGGREGATOR attempt %s/%s failed: %s",
+                attempt,
+                max_attempts,
+                exc,
+            )
+
+            if is_transient_chat_completion_error(exc) and attempt < max_attempts:
+                await asyncio.sleep(TRANSIENT_ERROR_RETRY_DELAY_SECONDS * attempt)
+
+    attempts_block = "\n".join(f"- {item}" for item in attempt_failures)
+    raise RuntimeError(
+        "FINAL_AGGREGATOR failed after "
+        f"{max_attempts} attempts. "
+        f"final_node_id={final_node.id}; "
+        f"parent_count={len(parent_names)}; "
+        f"parents={parent_names}; "
+        f"parent_status={parent_status}; "
+        f"input_preview={input_preview}. "
+        f"Attempt failures:\n{attempts_block}"
+    ) from last_error
+
+
 async def main(
     name: str,
     save_folder: str,
-    df_summary,
-    table_name: str,
     num_traces: int | None = None,
 ):
     logger.info(f"Starting AutoMAS evaluation for task name: {name}")
@@ -301,7 +552,8 @@ async def main(
         try:
             trace_data = lf.api.trace.get(task_id)
             query = parse_langfuse_task(trace_data)
-            logger.debug(f"Parsed task query: {query.user_query[:100]}...")
+            parsed_query_preview = (query.user_query or "")[:100]
+            logger.debug(f"Parsed task query: {parsed_query_preview}...")
 
             trace_metadata = {"task_id": task_id}
             if hasattr(trace_data, "output") and trace_data.output:
@@ -319,36 +571,21 @@ async def main(
                     )
                     logger.debug(f"Correct answer: {trace_metadata['correct_answer']}")
 
-            q = df_summary[df_summary["task_id"] == task_id]["summary"].values[0]
-            if q is None:
-                logger.error(f"Task {task_id} not found in summary dataframe")
-                continue
-
-            logger.debug(f"Parsed task query: {q}...")
-
-            # agent_states = [
-            #     state.model_dump(mode="json") for state in query.agent_states
-            # ]
+            history_for_evaluating = build_history_for_evaluating(query)
+            logger.debug(
+                "Prepared trace history for evaluating: %s chars",
+                len(history_for_evaluating),
+            )
 
             judge_input = {
                 "query": query.user_query,
-                "history_for_evaluating": str(q),
-                "table_name": table_name,
+                "history_for_evaluating": history_for_evaluating,
             }
 
             logger.info("Generating judge pool...")
 
             try:
-                attempts = 0
-                while attempts < 3:
-                    pool = await pool_gen.create_pool(judge_input)
-                    agents_info = pool.full_agents_data
-                    final_agent = any(
-                        agent.get("name") == "FINAL_AGGREGATOR" for agent in agents_info
-                    )
-                    if final_agent:
-                        break
-                    attempts += 1
+                pool = await create_pool_with_retries(pool_gen, judge_input)
 
             except Exception as e:
                 error_msg = str(e)
@@ -387,16 +624,42 @@ async def main(
                 metadata=trace_metadata,
             ) as span:
                 judge_client.update_current_trace(
-                    tags=[
-                        "test",
+                    tags = [
+                        "big_mas",
+                        "full",
+                        "gaia_without_summary",
                         f"task_id:{task_id}",
+                        f"folder:{save_folder}",
                     ]
                 )
 
                 logger.info("Executing evaluation pipeline...")
-                result, trace_id = await ainvoke_with_lf(
-                    pool, pipeline, judge_input, graph
-                )
+                try:
+                    result = await pipeline.ainvoke(judge_input)
+                except Exception as pipeline_error:
+                    final_node = pipeline.execution_order[-1]
+                    final_missing_output = (
+                        final_node.id not in pipeline.node_session.node_executions
+                    )
+
+                    if final_node.name == "FINAL_AGGREGATOR" and final_missing_output:
+                        logger.warning(
+                            "Pipeline failed before producing FINAL_AGGREGATOR output. "
+                            "Retrying FINAL_AGGREGATOR only without recreating pool. "
+                            "Original error: %s",
+                            pipeline_error,
+                        )
+
+                        await recover_missing_dependencies_for_final(pipeline)
+
+                        result = await run_final_agent_only_with_retries(
+                            pipeline,
+                            max_attempts=FINAL_AGENT_ONLY_ATTEMPTS,
+                        )
+                    else:
+                        raise
+
+                trace_id = None
                 logger.info(f"Pipeline execution completed. Trace ID: {trace_id}")
 
                 span.update(output={"result": result, "trace_id": trace_id})
@@ -488,23 +751,11 @@ async def main(
 
 
 if __name__ == "__main__":
-    summaries_directory = Path("path to our_mas (GHOST) summaries")
-
-    summary = []
-    for dir in summaries_directory.iterdir():
-        if dir.is_file() and dir.suffix == ".json":
-            with open(dir, "r") as f:
-                data = json.load(f)
-                summary.append([data, dir.name.split(".")[0]])
-    df_summary = pd.DataFrame(summary, columns=["summary", "task_id"])
-
     asyncio.run(
         main(
-            # name="gaia_task_db0c3ed0-a4af-4442-bb6f-884d6da055cb", # big mas
-            name="gaia_task_07aac7b1-ffc3-4787-8e4c-7fb522156097",  # small mas
-            save_folder="test",
-            df_summary=df_summary,
-            table_name="our_mas",
-            # num_traces=30,
+            name="gaia_task_db0c3ed0-a4af-4442-bb6f-884d6da055cb", # big mas
+            # name="gaia_task_07aac7b1-ffc3-4787-8e4c-7fb522156097",  # small mas
+            save_folder="big_mas_no_sum",
+            num_traces=165,
         )
     )

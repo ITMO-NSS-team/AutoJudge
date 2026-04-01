@@ -153,13 +153,15 @@ Evaluate whether the multi-agent system fully completed the user's task by asses
 4. *Actionability* - Can the user act on outputs to achieve their goal?
 5. *Efficiency* - Were tasks completed without unnecessary duplication?
 
+You must use the available tools at least once!
+
 **Scoring**:
 - \"ideal\": Task fully achieved, all subtasks addressed, outputs consistent and actionable
 - \"fair\": Task largely achieved but minor omissions or slight inconsistencies
 - \"poor\": Task failed, critical steps missing, inconsistent or unusable outputs
 
 Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": []
+    "mcp_tools": [get_content_tool]
   }
 ]
 
@@ -175,13 +177,15 @@ Evaluate complexity and interconnectedness of the multi-agent system.
 2. *Interconnection Quality* - Are agent connections well-designed and efficient?
 3. *System Scalability* - Can architecture accommodate growth and maintainability?
 
+You must use the available tools at least once!
+
 **Scoring**:
 - \"ideal\": Complexity perfectly balanced with optimal density and connections
 - \"fair\": Complexity manageable but has scalability or efficiency issues
 - \"poor\": Complexity poorly managed with density or connection problems
 
 Return single JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": []
+    "mcp_tools": [get_content_tool]
   }
 ]
 
@@ -198,13 +202,15 @@ Assess whether tools successfully fulfilled user requests by evaluating executio
 3. *Clarity* - Is output clear, structured, and in expected format?
 4. *Failure Handling* - Any errors or unrelated information returned?
 
+You must use the available tools at least once!
+
 **Scoring** (strict - zero tolerance for errors):
 - \"ideal\": Output perfectly solves task, all parts correct and complete
 - \"fair\": Output mostly correct but minor issues or omissions
 - \"poor\": Output fails task, incorrect, incomplete, or misleading
 
 Return JSON list: [{\"state_id\": \"...\", \"justification\": \"...\", \"score\": \"ideal|fair|poor\"}]",
-    "mcp_tools": []
+    "mcp_tools": [get_content_tool]
   }
 ]
 
@@ -223,6 +229,7 @@ Analyze execution trace to identify environment setup and configuration errors t
 3. *Environment Variables* - Missing or invalid env vars (os.environ KeyError)
 4. *Config Files* - Missing or malformed configs (FileNotFoundError, JSONDecodeError)
 5. *Dependencies* - Import errors or version conflicts (ModuleNotFoundError)
+You must use the available tools at least once!
 
 **Out of Scope**: HTTP status codes (401, 403, 429, 500), runtime API errors, network timeouts
 
@@ -232,7 +239,7 @@ Analyze execution trace to identify environment setup and configuration errors t
 - \"poor\": Critical setup errors prevented system startup
 
 Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": []
+    "mcp_tools": [get_content_tool]
   }
 ]
 
@@ -244,6 +251,7 @@ Example 5 - API Issues Detection:
 Analyze execution trace to identify API-related errors during RUNTIME execution.
 
 **Scope**: Focus on runtime API communication errors, NOT initialization/config errors.
+You must use the available tools at least once!
 
 **Evaluation Criteria** - Look for trace entries showing:
 1. *Rate Limiting* - HTTP 429, "Rate limit exceeded" (RateLimitError)
@@ -259,6 +267,28 @@ Analyze execution trace to identify API-related errors during RUNTIME execution.
 - \"ideal\": No API errors, all external calls succeeded
 - \"fair\": Minor/temporary API errors but system recovered
 - \"poor\": Critical API errors prevented task completion or occurred repeatedly
+
+Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "mcp_tools": []
+  }
+]
+
+Example 6 - Tool Selection Evaluation:
+[
+  {
+    "name": "TOOL_SELECTION_JUDGE",
+    "instructions": "**Instruction**:
+Assess whether tool selections made by the agent are appropriate for the task.
+
+**Evaluation Criteria**:
+1. *Tool Relevance* - Does the selected tool directly address the node_role responsibility?
+2. *Pipeline Position* - Is the tool suitable given the agent's position in the pipeline?
+3. *Justification* - Is the tool selection clearly supported by the task requirements?
+
+**Scoring**:
+- \"ideal\": Tool selection perfectly matches node_role and is clearly justified
+- \"fair\": Selection is relevant but potentially suboptimal for the task
+- \"poor\": Selection is inappropriate or clearly mismatched to node_role
 
 Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
     "mcp_tools": []
@@ -280,7 +310,7 @@ def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
 
 
 async def main(save_folder: str, df):
-    logger.info(f"===Starting Who&When evaluation===")
+    logger.info(f"===Starting TRAIL evaluation===")
 
     pool_gen = PoolGenerator(
         output_schema=output_schema, taxonomy=taxonomy, examples=examples
@@ -315,9 +345,9 @@ async def main(save_folder: str, df):
             logger.info(f"Task {trace_id} already processed, skipping...")
             continue
 
-        if df.iloc[idx]["question_ID"] in failed_traces_ids:
+        if df.iloc[idx]["trace_id"] in failed_traces_ids:
             logger.info(
-                f"Task {df.iloc[idx]["question_ID"]} already failed, skipping..."
+                f"Task {df.iloc[idx]["trace_id"]} already failed, skipping..."
             )
             continue
 
@@ -326,13 +356,21 @@ async def main(save_folder: str, df):
         serializable_results = {}
 
         try:
+            # trace_data = {
+            #     "history": df.iloc[idx]["spans"],
+            #     "question": "You should evaluate the trace.",
+            #     "task_id": df.iloc[idx]["trace_id"],
+            #     "trace_id": df.iloc[idx]["trace_id"],
+            # }
+            # q = trace_data["question"][:100]
             trace_data = {
-                "history": df.iloc[idx]["spans"],
+                "history": df.iloc[idx]["history"],
                 "question": "You should evaluate the trace.",
-                "task_id": df.iloc[idx]["trace_id"],
+                "task_id": df.iloc[idx]["task_id"],
                 "trace_id": df.iloc[idx]["trace_id"],
             }
             q = trace_data["question"][:100]
+
             logger.debug(f"Parsed task query: {q}...")
 
             trace_metadata = {
@@ -414,6 +452,11 @@ async def main(save_folder: str, df):
                 span.update(output={"result": result, "trace_id": trace_id})
                 span.end()
 
+            if result.startswith("```json"):
+                result = result.strip("```json").strip("```")
+            else:
+                result = result.strip()
+
             result_dict = json.loads(result)
 
             serializable_results["summarizer_score"] = {
@@ -462,35 +505,28 @@ async def main(save_folder: str, df):
             print(f"   Error: {error_msg}\n")
             continue
 
-        output_dir = local_results_dir
-        output_dir.mkdir(parents=True, exist_ok=True)
-        failed_file = output_dir / "failed_traces.txt"
+    output_dir = local_results_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    failed_file = output_dir / "failed_traces.txt"
 
-        if failed_traces_ids:
-            with open(failed_file, "w") as f:
+    if failed_traces:
+        first_run = not failed_file.exists()
+        with open(failed_file, "a") as f:
+            if first_run:
                 f.write(f"Failed traces: {len(failed_traces)} out of {len(df)}\n")
                 f.write("=" * 80 + "\n\n")
 
-                for failed in failed_traces:
-                    f.write(f"Task ID: {failed['task_id']}\n")
-                    f.write(f"Index: {failed['task_index']}/{len(df)}\n")
-                    f.write(f"Error Type: {failed['error_type']}\n")
-                    f.write(f"Error Message: {failed['error']}\n")
-                    f.write("-" * 80 + "\n\n")
-        else:
-            if failed_traces:
-                with open(failed_file, "w") as f:
-                    for failed in failed_traces:
-                        f.write(f"Task ID: {failed['task_id']}\n")
-                        f.write(f"Index: {failed['task_index']}/{len(df)}\n")
-                        f.write(f"Error Type: {failed['error_type']}\n")
-                        f.write(f"Error Message: {failed['error']}\n")
-                        f.write("-" * 80 + "\n\n")
+            for failed in failed_traces:
+                f.write(f"Task ID: {failed['task_id']}\n")
+                f.write(f"Index: {failed['task_index']}/{len(df)}\n")
+                f.write(f"Error Type: {failed['error_type']}\n")
+                f.write(f"Error Message: {failed['error']}\n")
+                f.write("-" * 80 + "\n\n")
 
-        if len(failed_traces) > 0:
-            logger.warning(
-                f"\n!  {len(failed_traces)} traces failed. Details saved to: {failed_file}\n"
-            )
+    if len(failed_traces) > 0:
+        logger.warning(
+            f"\n!  {len(failed_traces)} traces failed. Details saved to: {failed_file}\n"
+        )
 
     if failed_traces_ids:
         logger.info(
@@ -503,20 +539,20 @@ async def main(save_folder: str, df):
 
 
 def create_gaia_dataframe():
-    gaia_dir = Path("trail-benchmark/benchmarking/data/GAIA")
+    gaia_dir = Path("path/to/your/directory")
 
     json_files = list(gaia_dir.glob("*.json"))
 
     if not json_files:
         return None
 
-    files_to_process = json_files[:30]
+    files_to_process = json_files
 
     data_list = []
 
     for i, file_path in enumerate(files_to_process, 1):
         try:
-            print(f"[{i:2d}/30] {file_path.name}")
+            print(f"[{i:2d}/{len(files_to_process)}] {file_path.name}")
 
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -538,4 +574,4 @@ def create_gaia_dataframe():
 
 if __name__ == "__main__":
     df = create_gaia_dataframe()
-    asyncio.run(main(save_folder="who_and_when_gpt5_mini", df=df))
+    asyncio.run(main(save_folder="test", df=df))
