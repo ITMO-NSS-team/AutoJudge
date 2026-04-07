@@ -3,6 +3,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+import glob
 import asyncio
 import os
 from dotenv import load_dotenv
@@ -63,7 +64,7 @@ async def _summarize_chunk_with_retries(
     return results
 
 
-async def main(save_folder: str, df):
+async def main(save_folder: str, df: pd.DataFrame, bench_name: str):
     logger.info(f"===Starting Who&When evaluation===")
 
     summarizer_model = OpenAIChatModel(
@@ -102,8 +103,8 @@ async def main(save_folder: str, df):
         )
         summary_file = (
             Path(__file__).resolve().parent
-            / "summaries_agent_error_v2"
-            / "ALFWorld"
+            / save_folder
+            / bench_name
             / f"{str(df.iloc[idx]['filename'])}.json"
         )
         if os.path.exists(summary_file):
@@ -146,8 +147,8 @@ async def main(save_folder: str, df):
             logger.info("Trace summary generated")
             os.makedirs(
                 Path(__file__).resolve().parent
-                / "summaries_agent_error_v2"
-                / "ALFWorld",
+                / "summaries_agent_error"
+                / bench_name,
                 exist_ok=True,
             )
             with open(summary_file, "w") as f:
@@ -156,12 +157,7 @@ async def main(save_folder: str, df):
 
 
 if __name__ == "__main__":
-    import os
-    import json
-    import pandas as pd
-    import glob
-
-    folder = "/home/alina/Desktop/AutoJudge/examples/agent_error_bench/AgentErrorBench/Original_Failure_Trajectory/ALFWorld"
+    folder = "/home/alina/Desktop/AutoJudge/examples/agent_error_bench/AgentErrorBench/Original_Failure_Trajectory/GAIA"
 
     data = []
 
@@ -184,7 +180,8 @@ if __name__ == "__main__":
 
     asyncio.run(
         main(
-            save_folder="summary",
+            save_folder="summary_agent_error",
             df=df[:],
+            bench_name=Path(folder).name
         )
     )
