@@ -422,7 +422,7 @@ async def main(
                 },
                 metadata=trace_metadata,
             ) as span:
-                judge_client.update_current_trace(tags=["agent_error_afworld", f"task_id:{id}"])
+                judge_client.update_current_trace(tags=["agent_error_gaia", f"task_id:{id}"])
 
                 logger.info("Executing evaluation pipeline...")
                 result, trace_id = await ainvoke_with_lf(
@@ -519,8 +519,8 @@ async def main(
 
 
 if __name__ == "__main__":
-    df_original = pd.read_json("/home/alina/Desktop/AutoJudge/examples/agent_error_bench/AgentErrorBench/Label/alfworld_labels.json")
-    summaries_directory = Path("/home/alina/Desktop/AutoJudge/examples/agent_error_bench/summaries_agent_error/ALFWorld")
+    df_original = pd.read_json("/home/alina/Desktop/AutoJudge/examples/agent_error_bench/AgentErrorBench/Label/webshop_labels.json")
+    summaries_directory = Path("/home/alina/Desktop/AutoJudge/examples/agent_error_bench/summaries_agent_error/WebShop")
 
     summary = []
     for file_path in summaries_directory.iterdir():
@@ -532,9 +532,9 @@ if __name__ == "__main__":
 
     asyncio.run(
         main(
-            save_folder="afworld",
+            save_folder="webshop",
             df=df_original,
             df_summary=df_summary,
-            table_name="ae_afworld"
+            table_name="agent_error"
         )
     )

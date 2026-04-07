@@ -165,8 +165,6 @@ if __name__ == "__main__":
         with open(file, "r", encoding="utf-8") as f:
             content = json.load(f)
             filename = os.path.basename(file).replace(".json", "")
-            if not ('Llama' in filename):
-                continue
 
             if isinstance(content, dict):
                 data.append({"filename": filename, **content})
