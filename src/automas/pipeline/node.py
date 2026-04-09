@@ -31,6 +31,7 @@ class AgentNode(UsageTrackingMixin):
     model: str = os.getenv("AGENT_NODE_MODEL", "google/gemini-2.5-flash")
     api_key: Optional[str] = field(default=None, repr=False)
     mcp_tools: List[str] = field(default_factory=list)
+    use_tools: bool = True
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
 
     children: List["AgentNode"] = field(default_factory=list)
@@ -50,8 +51,8 @@ class AgentNode(UsageTrackingMixin):
             settings={"temperature": AGENT_NODE_TEMPERATURE},
         )
 
-        tools = [get_content_tool]
-        
+        tools = [get_content_tool] if self.use_tools else []
+
         # if self.mcp_tools:
         #     toolsets = registry.get_mcp_toolsets(self.mcp_tools)
 
