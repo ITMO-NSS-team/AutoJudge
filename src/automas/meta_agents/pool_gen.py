@@ -1,3 +1,4 @@
+import inspect
 import os
 from typing import List, Optional
 
@@ -9,7 +10,7 @@ from automas.pipeline.node import AgentNode
 from automas.utils import get_logger
 
 from .base import DEFAULT_MODEL, BaseMetaAgent
-from .prompt_registry import DEFAULT_POOL_INSTRUCT_EXTENDED
+from .prompt_registry import DEFAULT_POOL_INSTRUCT_EXTENDED, DEFAULT_POOL_INSTRUCT_EXTENDED_no_db_tool
 
 logger = get_logger()
 
@@ -19,6 +20,7 @@ class AgentSchema(BaseModel):
     instructions: str
     mcp_tools: List[str] = []
     model: str = os.getenv("AGENT_NODE_MODEL", "google/gemini-2.5-flash")
+    use_tools: bool = True
 
 
 class PoolGenerator(BaseMetaAgent):
@@ -36,6 +38,24 @@ class PoolGenerator(BaseMetaAgent):
         self.schema = output_schema
         self.taxonomy = taxonomy
         self.examples = examples
+
+        # Auto-detect instruction set from caller's imports
+        caller_frame = inspect.currentframe()
+        if caller_frame and caller_frame.f_back:
+            caller_globals = caller_frame.f_back.f_globals
+            self.use_tools = "DEFAULT_POOL_INSTRUCT_EXTENDED_no_db_tool" not in caller_globals
+            self.pool_instruct = (
+                DEFAULT_POOL_INSTRUCT_EXTENDED_no_db_tool
+                if not self.use_tools
+                else DEFAULT_POOL_INSTRUCT_EXTENDED
+            )
+            if not self.use_tools:
+                logger.info("Detected no-tools mode from caller imports")
+        else:
+            self.use_tools = True
+            self.pool_instruct = DEFAULT_POOL_INSTRUCT_EXTENDED
+            logger.warning("Could not detect caller frame; defaulting to use_tools=True")
+
         super().__init__(
             model=model,
             temperature=temperature,
@@ -43,7 +63,7 @@ class PoolGenerator(BaseMetaAgent):
 
     def _get_system_prompt(self) -> str:
         mcp_servers_desc = get_server_descriptions()
-        return DEFAULT_POOL_INSTRUCT_EXTENDED.substitute(
+        return self.pool_instruct.substitute(
             mcp_servers_desc=mcp_servers_desc,
             taxonomy=self.taxonomy,
             judge_output_format=self.schema,
@@ -67,6 +87,7 @@ class PoolGenerator(BaseMetaAgent):
                 instructions=schema.instructions,
                 model=schema.model,
                 mcp_tools=schema.mcp_tools,
+                use_tools=self.use_tools,
             )
             for schema in agent_schemas
         ]
