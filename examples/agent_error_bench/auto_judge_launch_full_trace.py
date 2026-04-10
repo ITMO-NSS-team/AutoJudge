@@ -140,7 +140,7 @@ Evaluate whether the multi-agent system fully completed the user's task by asses
 4. *Actionability* - Can the user act on outputs to achieve their goal?
 5. *Efficiency* - Were tasks completed without unnecessary duplication?
 
-You must use the available tools at least once!
+
 
 **Scoring**:
 - \"ideal\": Task fully achieved, all subtasks addressed, outputs consistent and actionable
@@ -148,7 +148,7 @@ You must use the available tools at least once!
 - \"poor\": Task failed, critical steps missing, inconsistent or unusable outputs
 
 Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": [get_content_tool]
+    "mcp_tools": []
   }
 ]
 
@@ -164,7 +164,7 @@ Evaluate complexity and interconnectedness of the multi-agent system.
 2. *Interconnection Quality* - Are agent connections well-designed and efficient?
 3. *System Scalability* - Can architecture accommodate growth and maintainability?
 
-You must use the available tools at least once!
+
 
 **Scoring**:
 - \"ideal\": Complexity perfectly balanced with optimal density and connections
@@ -172,7 +172,7 @@ You must use the available tools at least once!
 - \"poor\": Complexity poorly managed with density or connection problems
 
 Return single JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": [get_content_tool]
+    "mcp_tools": []
   }
 ]
 
@@ -189,7 +189,7 @@ Assess whether tools successfully fulfilled user requests by evaluating executio
 3. *Clarity* - Is output clear, structured, and in expected format?
 4. *Failure Handling* - Any errors or unrelated information returned?
 
-You must use the available tools at least once!
+
 
 **Scoring** (strict - zero tolerance for errors):
 - \"ideal\": Output perfectly solves task, all parts correct and complete
@@ -197,7 +197,7 @@ You must use the available tools at least once!
 - \"poor\": Output fails task, incorrect, incomplete, or misleading
 
 Return JSON list: [{\"state_id\": \"...\", \"justification\": \"...\", \"score\": \"ideal|fair|poor\"}]",
-    "mcp_tools": [get_content_tool]
+    "mcp_tools": []
   }
 ]
 
@@ -216,7 +216,6 @@ Analyze execution trace to identify environment setup and configuration errors t
 3. *Environment Variables* - Missing or invalid env vars (os.environ KeyError)
 4. *Config Files* - Missing or malformed configs (FileNotFoundError, JSONDecodeError)
 5. *Dependencies* - Import errors or version conflicts (ModuleNotFoundError)
-You must use the available tools at least once!
 
 **Out of Scope**: HTTP status codes (401, 403, 429, 500), runtime API errors, network timeouts
 
@@ -226,7 +225,7 @@ You must use the available tools at least once!
 - \"poor\": Critical setup errors prevented system startup
 
 Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": [get_content_tool]
+    "mcp_tools": []
   }
 ]
 
@@ -238,7 +237,7 @@ Example 5 - API Issues Detection:
 Analyze execution trace to identify API-related errors during RUNTIME execution.
 
 **Scope**: Focus on runtime API communication errors, NOT initialization/config errors.
-You must use the available tools at least once!
+
 
 **Evaluation Criteria** - Look for trace entries showing:
 1. *Rate Limiting* - HTTP 429, "Rate limit exceeded" (RateLimitError)
@@ -297,12 +296,12 @@ def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
 
 
 async def main(
-    save_folder: str, df, df_summary, table_name: str, num_traces: int | None = None
+    save_folder: str, df, df_full, table_name: str, num_traces: int | None = None, tag: str = "ae_afworld_full_trace"
 ):
     logger.info(f"===Starting evaluation===")
 
     pool_gen = PoolGenerator(
-        output_schema=output_schema, taxonomy=taxonomy, examples=examples
+        output_schema=output_schema, taxonomy=taxonomy, examples=examples, use_summary=False
     )
     judge_client = get_langfuse_judge_client()
     logger.info("Initialized generators and Langfuse client")
@@ -354,7 +353,7 @@ async def main(
                 "task_id": id,
                 "trace_id": id,
             }
-            q = df_summary[df_summary["question_ID"] == id]["summary"].values[0]
+            q = df_full[df_full["question_ID"] == id]["messages"].values[0]
             logger.debug(f"Parsed task query: {q}...")
 
             trace_metadata = {
@@ -422,7 +421,7 @@ async def main(
                 },
                 metadata=trace_metadata,
             ) as span:
-                judge_client.update_current_trace(tags=["agent_error_gaia", f"task_id:{id}"])
+                judge_client.update_current_trace(tags=[tag, f"task_id:{id}"])
 
                 logger.info("Executing evaluation pipeline...")
                 result, trace_id = await ainvoke_with_lf(
@@ -519,22 +518,22 @@ async def main(
 
 
 if __name__ == "__main__":
-    df_original = pd.read_json("/home/alina/Desktop/AutoJudge/examples/agent_error_bench/AgentErrorBench/Label/alfworld_labels.json")
-    summaries_directory = Path("/home/alina/Desktop/AutoJudge/examples/agent_error_bench/summaries_agent_error/ALFWorld")
-
+    df_labels = pd.read_json("/home/alina/Desktop/AutoJudge/examples/agent_error_bench/AgentErrorBench/Label/gaia_labels.json")
+    raw_data_directory = Path("/home/alina/Desktop/AutoJudge/examples/agent_error_bench/AgentErrorBench/Original_Failure_Trajectory/GAIA")
     summary = []
-    for file_path in summaries_directory.iterdir():
+    for file_path in raw_data_directory.iterdir():
         if file_path.is_file() and file_path.suffix == ".json":
             with open(file_path, "r") as f:
                 data = json.load(f)
-                summary.append([data, file_path.stem]) 
-    df_summary = pd.DataFrame(summary, columns=["summary", "question_ID"])
+                summary.append([data["messages"], file_path.stem]) 
+    messages = pd.DataFrame(summary, columns=["messages", "question_ID"])
 
     asyncio.run(
         main(
-            save_folder="alfworld",
-            df=df_original,
-            df_summary=df_summary,
-            table_name="agent_error"
+            save_folder="full_trace_gaia",
+            df=df_labels,
+            df_full=messages,
+            table_name="agent_error",
+            tag="FIXED_gaia_full_trace"
         )
     )
