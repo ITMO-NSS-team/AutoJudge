@@ -5,8 +5,8 @@ from automas.pipeline.pipeline_builder import PipelineBuilder
 from automas.pipeline.types import GraphDict
 from automas.utils.logger import get_logger
 
-from .base import DEFAULT_MODEL, BaseMetaAgent
-from .prompt_registry import DEFAULT_GRAPH_INSTRUCT
+from .base import BaseMetaAgent
+from .prompts import DEFAULT_GRAPH_INSTRUCT
 import os
 
 if TYPE_CHECKING:
@@ -67,7 +67,6 @@ class GraphGenerator(BaseMetaAgent):
 
     def _validate_graph(self, agent_pool: "AgentPool", graph_dict: GraphDict) -> None:
         try:
-            # TODO: Implement graph validation logic
             builder = PipelineBuilder()
             builder.create_from_pool(agent_pool, graph_dict)
         except KeyError as e:

@@ -1,7 +1,7 @@
 import copy
 from typing import Optional
 
-from automas import ALL_AGENTS_POOL, AgentPool
+from automas import AgentPool
 from automas.meta_agents.base import DEFAULT_MODEL, BaseMetaAgent
 from automas.pipeline.types import GraphDict
 from automas.utils.logger import get_logger

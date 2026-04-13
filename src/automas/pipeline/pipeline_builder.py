@@ -142,7 +142,6 @@ class PipelineBuilder:
         Topological sort to determine execution order (entry nodes first, terminal node last).
         https://www.geeksforgeeks.org/dsa/topological-sorting/
         """
-        # TODO: validation for relations
         # Count incoming edges for each node
         in_degree = {node_id: len(node.parents) for node_id, node in self.nodes.items()}
 

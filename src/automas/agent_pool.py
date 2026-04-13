@@ -19,10 +19,6 @@ class AgentPool:
 
     def add_agent(self, agent: AgentNode) -> AgentPool:
         """Add agent to pool. Returns self for chaining."""
-        # TODO: resolve duplicate agents checking
-        # if agent.name in self._agents_by_name:
-        #     raise ValueError(f"Agent with name '{agent.name}' already exists in pool")
-
         self._agents[agent.id] = agent
         self._agents_by_name[agent.name] = agent
         return self
@@ -42,12 +38,6 @@ class AgentPool:
 
     def __add__(self, other: AgentPool) -> AgentPool:
         """Combine two agent pools. Returns new pool with agents from both pools."""
-        # TODO: resolve duplicate agents checking
-        # conflicts = set(self._agents_by_name.keys()) & set(other._agents_by_name.keys())
-        # if conflicts:
-        #     for conflict in conflicts:
-        #         other._agents_by_name.pop(conflict)
-
         combined_agents = list(self._agents.values()) + list(other._agents.values())
         return AgentPool(combined_agents)
 

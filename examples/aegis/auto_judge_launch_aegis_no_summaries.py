@@ -1,6 +1,5 @@
 ﻿import asyncio
 import json
-import logging
 import os
 import re
 import sys
@@ -12,10 +11,8 @@ from dotenv import load_dotenv
 
 load_dotenv(".env")
 
-# Import the no-tools instruction set to auto-disable tools
-from automas.meta_agents.prompt_registry import DEFAULT_POOL_INSTRUCT_EXTENDED_no_db_tool
-
 from automas.meta_agents import PoolGenerator
+from automas.meta_agents.prompts import DEFAULT_POOL_INSTRUCT_EXTENDED_no_db_tool
 from automas.agent_pool import AgentPool
 from automas.pipeline.types import GraphDict
 from automas.pipeline import PipelineBuilder
@@ -495,7 +492,11 @@ async def main(save_folder: str, split: str = "test", max_traces: int | None = N
     logger.info("===Starting AEGIS evaluation WITHOUT SUMMARIES===")
 
     pool_gen = PoolGenerator(
-        output_schema=output_schema, taxonomy=taxonomy, examples=examples
+        output_schema=output_schema,
+        taxonomy=taxonomy,
+        examples=examples,
+        use_tools=False,
+        prompt_template=DEFAULT_POOL_INSTRUCT_EXTENDED_no_db_tool,
     )
     judge_client = get_langfuse_judge_client()
     setup_langfuse_instrumentation()

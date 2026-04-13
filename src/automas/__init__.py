@@ -21,7 +21,6 @@ __all__ = [
     "AgentPool",
     "DefaultAgents",
     "RESEARCH_POOL",
-    "CONTENT_POOL",
     "PLANNING_POOL",
     "ALL_AGENTS_POOL",
 ]

@@ -5,7 +5,7 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIChatModel
 from typing import List
 
-from .prompt_registry import STEP_BY_STEP_SUMMARIZATION_PROMPT
+from .prompts import STEP_BY_STEP_SUMMARIZATION_PROMPT
 
 
 class StepByStepSummaryItem(BaseModel):

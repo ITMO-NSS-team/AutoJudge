@@ -65,7 +65,7 @@ async def _summarize_chunk_with_retries(
 
 
 async def main(save_folder: str, df: pd.DataFrame, bench_name: str):
-    logger.info(f"===Starting Who&When evaluation===")
+    logger.info("===Starting Who&When evaluation===")
 
     summarizer_model = OpenAIChatModel(
         "google/gemini-2.5-flash",

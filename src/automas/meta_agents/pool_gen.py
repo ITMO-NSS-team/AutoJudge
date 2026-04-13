@@ -1,5 +1,5 @@
-import inspect
 import os
+from string import Template
 from typing import List, Optional
 
 from pydantic import BaseModel
@@ -9,8 +9,8 @@ from automas.mcp.registry import get_server_descriptions
 from automas.pipeline.node import AgentNode
 from automas.utils import get_logger
 
-from .base import DEFAULT_MODEL, BaseMetaAgent
-from .prompt_registry import DEFAULT_POOL_INSTRUCT_EXTENDED, DEFAULT_POOL_INSTRUCT_EXTENDED_no_db_tool
+from .base import BaseMetaAgent
+from .prompts import DEFAULT_POOL_INSTRUCT_EXTENDED
 
 logger = get_logger()
 
@@ -31,30 +31,14 @@ class PoolGenerator(BaseMetaAgent):
         output_schema: str = "",
         taxonomy: str = "",
         examples: str = "",
+        use_tools: bool = True,
+        prompt_template: Optional[Template] = None,
     ):
-        print(
-            f"Initializing PoolGenerator with model={model}, temperature={temperature}"
-        )
         self.schema = output_schema
         self.taxonomy = taxonomy
         self.examples = examples
-
-        # Auto-detect instruction set from caller's imports
-        caller_frame = inspect.currentframe()
-        if caller_frame and caller_frame.f_back:
-            caller_globals = caller_frame.f_back.f_globals
-            self.use_tools = "DEFAULT_POOL_INSTRUCT_EXTENDED_no_db_tool" not in caller_globals
-            self.pool_instruct = (
-                DEFAULT_POOL_INSTRUCT_EXTENDED_no_db_tool
-                if not self.use_tools
-                else DEFAULT_POOL_INSTRUCT_EXTENDED
-            )
-            if not self.use_tools:
-                logger.info("Detected no-tools mode from caller imports")
-        else:
-            self.use_tools = True
-            self.pool_instruct = DEFAULT_POOL_INSTRUCT_EXTENDED
-            logger.warning("Could not detect caller frame; defaulting to use_tools=True")
+        self.use_tools = use_tools
+        self.pool_instruct = prompt_template or DEFAULT_POOL_INSTRUCT_EXTENDED
 
         super().__init__(
             model=model,

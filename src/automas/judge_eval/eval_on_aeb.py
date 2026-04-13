@@ -62,5 +62,9 @@ def evaluate_metrics(folder_path: str):
 
 
 if __name__ == "__main__":
-    folder_path = "/path/to/your/json_folder"  
-    evaluate_metrics(folder_path)
+    import sys
+
+    if len(sys.argv) < 2:
+        print("Usage: python eval_on_aeb.py <path_to_json_folder>")
+        sys.exit(1)
+    evaluate_metrics(sys.argv[1])

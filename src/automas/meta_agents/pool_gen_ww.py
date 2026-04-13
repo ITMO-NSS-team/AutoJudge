@@ -1,27 +1,16 @@
+"""Backward-compatible alias. Use PoolGenerator with prompt_template instead."""
+
 import os
-from typing import List, Optional
+from string import Template
+from typing import Optional
 
-from pydantic import BaseModel
-
-from automas.agent_pool import AgentPool
-from automas.mcp.registry import get_server_descriptions
-from automas.pipeline.node import AgentNode
-from automas.utils import get_logger
-
-from .base import BaseMetaAgent
-from .prompt_registry import DEFAULT_POOL_INSTRUCT_EXTENDED_WW
-
-logger = get_logger()
+from .pool_gen import PoolGenerator
+from .prompts import DEFAULT_POOL_INSTRUCT_EXTENDED_WW
 
 
-class AgentSchema(BaseModel):
-    name: str
-    instructions: str
-    mcp_tools: List[str] = []
-    model: str = os.getenv("AGENT_NODE_MODEL", "google/gemini-2.5-flash")
+class PoolGenerator_WW(PoolGenerator):
+    """PoolGenerator pre-configured with the Who-and-When prompt template."""
 
-
-class PoolGenerator_WW(BaseMetaAgent):
     def __init__(
         self,
         model: str = os.getenv("POOL_GEN_MODEL", "google/gemini-3-flash-preview"),
@@ -29,60 +18,15 @@ class PoolGenerator_WW(BaseMetaAgent):
         output_schema: str = "",
         taxonomy: str = "",
         examples: str = "",
+        use_tools: bool = True,
+        prompt_template: Optional[Template] = None,
     ):
-        print(
-            f"Initializing PoolGenerator with model={model}, temperature={temperature}"
-        )
-        self.schema = output_schema
-        self.taxonomy = taxonomy
-        self.examples = examples
         super().__init__(
             model=model,
             temperature=temperature,
+            output_schema=output_schema,
+            taxonomy=taxonomy,
+            examples=examples,
+            use_tools=use_tools,
+            prompt_template=prompt_template or DEFAULT_POOL_INSTRUCT_EXTENDED_WW,
         )
-
-    def _get_system_prompt(self) -> str:
-        mcp_servers_desc = get_server_descriptions()
-        return DEFAULT_POOL_INSTRUCT_EXTENDED_WW.substitute(
-            mcp_servers_desc=mcp_servers_desc,
-            taxonomy=self.taxonomy,
-            judge_output_format=self.schema,
-            examples=self.examples,
-        )
-
-    def _get_output_type(self):
-        return list[AgentSchema]
-
-    def _create_agents(self, agent_schemas: List[AgentSchema]) -> List[AgentNode]:
-        if not agent_schemas:
-            raise ValueError("No valid agents generated")
-
-        logger.info(
-            f"Creating {len(agent_schemas)} agents: {[s.name for s in agent_schemas]}"
-        )
-
-        return [
-            AgentNode(
-                name=schema.name,
-                instructions=schema.instructions,
-                model=schema.model,
-                mcp_tools=schema.mcp_tools,
-            )
-            for schema in agent_schemas
-        ]
-
-    async def create_pool(
-        self, task_description: str, context: Optional[str] = None
-    ) -> AgentPool:
-        user_prompt = f"TASK: {task_description}"
-
-        if context:
-            user_prompt += f"\n\nPREVIOUS ATTEMPT FEEDBACK:\n{context}"
-
-        agent_schemas = await self._run_agent(user_prompt)
-
-        agents = self._create_agents(agent_schemas)
-
-        logger.info(f"Successfully created agent pool with {len(agents)} agents")
-
-        return AgentPool(agents)

@@ -9,7 +9,7 @@ from automas.pipeline.types import GraphDict
 from automas.utils.logger import get_logger
 
 from .base import DEFAULT_MODEL, BaseMetaAgent
-from .prompt_registry import UNIFIED_GEN_INSTRUCT
+from .prompts import UNIFIED_GEN_INSTRUCT
 from .pool_gen import AgentSchema
 
 

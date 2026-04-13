@@ -1,4 +1,3 @@
-import os
 import json
 import statistics
 from pathlib import Path

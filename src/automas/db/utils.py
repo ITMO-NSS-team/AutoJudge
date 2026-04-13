@@ -1,11 +1,8 @@
-import psycopg2
 import json
 
-DB_NAME = "maseval"
-DB_USER = "postgres"
-DB_PASSWORD = ""  # set to None if no password
-DB_HOST = "localhost"
-DB_PORT = 5432
+import psycopg2
+
+from .config import DB_HOST, DB_NAME, DB_PASSWORD, DB_PORT, DB_USER
 
 
 def get_content_by_state(state_id, table_name="our_mas"):
@@ -17,7 +14,7 @@ def get_content_by_state(state_id, table_name="our_mas"):
         conn = psycopg2.connect(
             dbname=DB_NAME,
             user=DB_USER,
-            password=DB_PASSWORD,
+            password=DB_PASSWORD or None,
             host=DB_HOST,
             port=DB_PORT,
         )
@@ -42,12 +39,7 @@ def get_content_by_state(state_id, table_name="our_mas"):
 
 
 if __name__ == "__main__":
-    # our_mas state_id: "0d1d4b2d2c1dd706b347aaa05d29d503_1"
-    # who_when state_id: "5f982798-16b9-4051-ab57-cfc7ebdb2a91_1"
-    # trail state_id: "0adc4f3b99d9564d32811e913cc9d248_1"
     test_state_id = "0adc4f3b99d9564d32811e913cc9d248_1"
-    content = get_content_by_state(
-        state_id=test_state_id, table_name="our_mas"
-    )  # or who_when or trail
+    content = get_content_by_state(state_id=test_state_id, table_name="our_mas")
     if content:
         print(json.dumps(content, indent=2, ensure_ascii=False))

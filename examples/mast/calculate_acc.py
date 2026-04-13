@@ -1,10 +1,9 @@
 import json
-import os
 from collections import defaultdict
 from pathlib import Path
 import csv
 from sklearn.metrics import accuracy_score, f1_score
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 import re
 
 

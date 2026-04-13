@@ -99,7 +99,6 @@ class UsageTrackingMixin:
                 output_tokens=output_tok,
             )
 
-            # TODO: Implement model selection logic
             provider_id = self.model.split("/")[0]  # type: ignore
             model = self.model.split("/")[1]  # type: ignore
 

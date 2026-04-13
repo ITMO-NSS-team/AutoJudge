@@ -1,16 +1,11 @@
-from pydantic import BaseModel
-from typing import Optional
-from pydantic_ai import Tool
-import psycopg2
 import json
-from pydantic_ai import RunContext, Tool
-from typing import Annotated
+from typing import Annotated, Optional
 
-DB_NAME = "maseval"
-DB_USER = "postgres"
-DB_PASSWORD = ""  # set to None if no password
-DB_HOST = "localhost"
-DB_PORT = 5432
+import psycopg2
+from pydantic import BaseModel
+from pydantic_ai import RunContext, Tool
+
+from .config import DB_HOST, DB_NAME, DB_PASSWORD, DB_PORT, DB_USER
 
 
 class GetContentInput(BaseModel):
@@ -66,7 +61,7 @@ async def get_content_function(
         conn = psycopg2.connect(
             dbname=DB_NAME,
             user=DB_USER,
-            password=DB_PASSWORD,
+            password=DB_PASSWORD or None,
             host=DB_HOST,
             port=DB_PORT,
         )

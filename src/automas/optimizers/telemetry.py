@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import random
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import MappingProxyType
-from typing import Any, cast, get_args
+from typing import Any, get_args
 from copy import deepcopy
 
 from automas.agent_pool import AgentPool

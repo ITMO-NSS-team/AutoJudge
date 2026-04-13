@@ -240,7 +240,7 @@ def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
 async def main(
     save_folder: str, df, df_summary, table_name: str, num_traces: int | None = None
 ):
-    logger.info(f"===Starting Who&When evaluation===")
+    logger.info("===Starting Who&When evaluation===")
 
     pool_gen = PoolGenerator(
         output_schema=output_schema, taxonomy=taxonomy, examples=examples

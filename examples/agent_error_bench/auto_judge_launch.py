@@ -18,7 +18,6 @@ from automas.utils import get_logger
 from maseval import get_langfuse_judge_client
 import json
 import pandas as pd
-from toon_format import encode
 
 logger = get_logger(__name__)
 
@@ -299,7 +298,7 @@ def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
 async def main(
     save_folder: str, df, df_summary, table_name: str, num_traces: int | None = None
 ):
-    logger.info(f"===Starting evaluation===")
+    logger.info("===Starting evaluation===")
 
     pool_gen = PoolGenerator(
         output_schema=output_schema, taxonomy=taxonomy, examples=examples

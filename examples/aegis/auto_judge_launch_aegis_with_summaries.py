@@ -1,5 +1,4 @@
 ﻿import json
-import logging
 import os
 import sys
 import re
@@ -11,9 +10,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 from dotenv import load_dotenv
 
 load_dotenv(".env")
-
-# Import the extended instruction set to auto-enable tools
-from automas.meta_agents.prompt_registry import DEFAULT_POOL_INSTRUCT_EXTENDED
 
 from automas.meta_agents import PoolGenerator
 from automas.agent_pool import AgentPool

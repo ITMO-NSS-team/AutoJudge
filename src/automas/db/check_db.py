@@ -1,12 +1,8 @@
-import psycopg2
 import json
 
+import psycopg2
 
-DB_NAME = "maseval"
-DB_USER = "postgres"
-DB_PASSWORD = ""  # set to None if no password
-DB_HOST = "localhost"
-DB_PORT = 5432
+from .config import DB_HOST, DB_NAME, DB_PASSWORD, DB_PORT, DB_USER
 
 
 def check_table(table_name: str = "our_mas", limit: int = 5):
@@ -15,7 +11,7 @@ def check_table(table_name: str = "our_mas", limit: int = 5):
         conn = psycopg2.connect(
             dbname=DB_NAME,
             user=DB_USER,
-            password=DB_PASSWORD,
+            password=DB_PASSWORD or None,
             host=DB_HOST,
             port=DB_PORT,
         )
@@ -49,4 +45,4 @@ def check_table(table_name: str = "our_mas", limit: int = 5):
 
 
 if __name__ == "__main__":
-    check_table(table_name="our_mas")  # or who_when or trail
+    check_table(table_name="our_mas")

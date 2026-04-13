@@ -188,7 +188,7 @@ def clean_directory(input_dir: str, output_dir: str, pattern: str = "*.json"):
             print(f"ERROR processing {json_file.name}: {e}")
     
     print("=" * 80)
-    print(f"\nSummary:")
+    print("\nSummary:")
     print(f"  Successfully processed: {successful}/{len(json_files)}")
     if failed:
         print(f"  Failed: {len(failed)}")
@@ -238,7 +238,7 @@ def main():
         print(f"Cleaned size:  {stats['cleaned_size']:,} bytes")
         print(f"Reduction:     {stats['reduction_bytes']:,} bytes ({stats['reduction_percent']:.1f}%)")
         print(f"\nCleaned file saved to: {output_file}")
-        print(f"\nTo process all files, run: python clean_traces.py --batch")
+        print("\nTo process all files, run: python clean_traces.py --batch")
 
 
 if __name__ == "__main__":

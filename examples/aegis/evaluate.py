@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-from collections import defaultdict
 import argparse
 
 def calculate_metrics(true_labels_list, pred_labels_list):
