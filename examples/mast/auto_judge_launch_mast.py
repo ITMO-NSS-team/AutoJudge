@@ -9,12 +9,12 @@ from dotenv import load_dotenv
 
 load_dotenv(".env")
 
-from automas.meta_agents import PoolGenerator
-from automas.pipeline import PipelineBuilder
-from automas.utils.langfuse_utils import ainvoke_with_lf
-from automas.utils import get_logger
-from automas.agent_pool import AgentPool
-from automas.pipeline.types import GraphDict
+from autojudge.meta_agents import PoolGenerator
+from autojudge.pipeline import PipelineBuilder
+from autojudge.utils.langfuse_utils import ainvoke_with_lf
+from autojudge.utils import get_logger
+from autojudge.agent_pool import AgentPool
+from autojudge.pipeline.types import GraphDict
 from maseval import get_langfuse_judge_client
 import json
 import pandas as pd

@@ -10,7 +10,7 @@ ruff := "ruff"
 pytest := "pytest"
 mypy := "mypy"
 
-source_dir := "src/automas"
+source_dir := "src/autojudge"
 tests_dir := "tests"
 examples_dir := "examples"
 all_dirs := source_dir + " " + tests_dir + " " + examples_dir
@@ -403,10 +403,10 @@ gaia-docker-run script *args:
     echo ""
 
     mkdir -p examples/gaia/gaia_logs
-    mkdir -p automas_logs
+    mkdir -p autojudge_logs
 
     {{container_cmd}} build
-    {{container_cmd}} run --rm automas \
+    {{container_cmd}} run --rm autojudge \
         python3 "$SCRIPT_PATH" {{args}}
 
 # Run specific GAIA script in container with batch support
@@ -426,10 +426,10 @@ gaia-docker-script-batch script batch_num difficulty="all" *extra_args:
     echo ""
 
     mkdir -p examples/gaia/gaia_logs
-    mkdir -p automas_logs
+    mkdir -p autojudge_logs
 
     {{container_cmd}} build
-    {{container_cmd}} run --rm automas \
+    {{container_cmd}} run --rm autojudge \
         python3 examples/gaia/{{script}}.py \
         --difficulty {{difficulty}} \
         --split "$SPLIT" {{extra_args}}
@@ -444,7 +444,7 @@ gaia-docker-script-all script difficulty="all" *extra_args:
     echo ""
 
     mkdir -p examples/gaia/gaia_logs
-    mkdir -p automas_logs
+    mkdir -p autojudge_logs
 
     echo "Building container image..."
     {{container_cmd}} build
@@ -461,7 +461,7 @@ gaia-docker-script-all script difficulty="all" *extra_args:
         echo "Starting batch $i/16"
         echo "========================================="
 
-        {{container_cmd}} run --rm automas \
+        {{container_cmd}} run --rm autojudge \
             python3 examples/gaia/{{script}}.py \
             --difficulty {{difficulty}} \
             --split "$SPLIT" {{extra_args}}
@@ -502,7 +502,7 @@ gaia-docker-script-range script start_batch end_batch difficulty="all" *extra_ar
     echo ""
 
     mkdir -p examples/gaia/gaia_logs
-    mkdir -p automas_logs
+    mkdir -p autojudge_logs
 
     echo "Building container image..."
     {{container_cmd}} build
@@ -519,7 +519,7 @@ gaia-docker-script-range script start_batch end_batch difficulty="all" *extra_ar
         echo "Starting batch $i/$END"
         echo "========================================="
 
-        {{container_cmd}} run --rm automas \
+        {{container_cmd}} run --rm autojudge \
             python3 examples/gaia/{{script}}.py \
             --difficulty {{difficulty}} \
             --split "$SPLIT" {{extra_args}}
@@ -556,10 +556,10 @@ gaia-docker-batch batch_num difficulty="all" max_iter="3":
     echo ""
 
     mkdir -p examples/gaia/gaia_logs
-    mkdir -p automas_logs
+    mkdir -p autojudge_logs
 
     {{container_cmd}} build
-    {{container_cmd}} run --rm automas \
+    {{container_cmd}} run --rm autojudge \
         python3 examples/gaia/run_gaia_with_judge.py \
         --difficulty {{difficulty}} \
         --split "$SPLIT" \
@@ -575,7 +575,7 @@ gaia-docker-all difficulty="all" max_iter="3":
     echo ""
 
     mkdir -p examples/gaia/gaia_logs
-    mkdir -p automas_logs
+    mkdir -p autojudge_logs
 
     echo "Building container image..."
     {{container_cmd}} build
@@ -592,7 +592,7 @@ gaia-docker-all difficulty="all" max_iter="3":
         echo "Starting batch $i/16"
         echo "========================================="
 
-        {{container_cmd}} run --rm automas \
+        {{container_cmd}} run --rm autojudge \
             python3 examples/gaia/run_gaia_with_judge.py \
             --difficulty {{difficulty}} \
             --split "$SPLIT" \
@@ -634,7 +634,7 @@ gaia-docker-range start_batch end_batch difficulty="all" max_iter="3":
     echo ""
 
     mkdir -p examples/gaia/gaia_logs
-    mkdir -p automas_logs
+    mkdir -p autojudge_logs
 
     echo "Building container image..."
     {{container_cmd}} build
@@ -651,7 +651,7 @@ gaia-docker-range start_batch end_batch difficulty="all" max_iter="3":
         echo "Starting batch $i/$END"
         echo "========================================="
 
-        {{container_cmd}} run --rm automas \
+        {{container_cmd}} run --rm autojudge \
             python3 examples/gaia/run_gaia_with_judge.py \
             --difficulty {{difficulty}} \
             --split "$SPLIT" \

@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from automas.mcp.servers.document.docx_reader import extract_images_from_docx
-from automas.mcp.servers.document.pdf_reader import extract_images_from_pdf
-from automas.mcp.servers.document.pptx_reader import extract_images_from_pptx
-from automas.mcp.servers.document.utils import get_file_hash
-from automas.mcp.servers.document.xlsx_reader import extract_images_from_xlsx
+from autojudge.mcp.servers.document.docx_reader import extract_images_from_docx
+from autojudge.mcp.servers.document.pdf_reader import extract_images_from_pdf
+from autojudge.mcp.servers.document.pptx_reader import extract_images_from_pptx
+from autojudge.mcp.servers.document.utils import get_file_hash
+from autojudge.mcp.servers.document.xlsx_reader import extract_images_from_xlsx
 
 
 class TestDocumentCaching:
@@ -18,32 +18,32 @@ class TestDocumentCaching:
 
     @pytest.fixture
     def pdf_file(self):
-        return "/home/glhf/Documents/repos/automas-research/examples/data/366e2f2b-8632-4ef2-81eb-bc3877489217.pdf"
+        return "/home/glhf/Documents/repos/autojudge-research/examples/data/366e2f2b-8632-4ef2-81eb-bc3877489217.pdf"
 
     @pytest.fixture
     def docx_file(self):
-        return "/home/glhf/Documents/repos/automas-research/examples/data/cffe0e32-c9a6-4c52-9877-78ceb4aaa9fb.docx"
+        return "/home/glhf/Documents/repos/autojudge-research/examples/data/cffe0e32-c9a6-4c52-9877-78ceb4aaa9fb.docx"
 
     @pytest.fixture
     def pptx_file(self):
-        return "/home/glhf/Documents/repos/automas-research/examples/data/a3fbeb63-0e8c-4a11-bff6-0e3b484c3e9c.pptx"
+        return "/home/glhf/Documents/repos/autojudge-research/examples/data/a3fbeb63-0e8c-4a11-bff6-0e3b484c3e9c.pptx"
 
     @pytest.fixture
     def xlsx_file(self):
-        return "/home/glhf/Documents/repos/automas-research/examples/data/7cc4acfa-63fd-4acc-a1a1-e8e529e0a97f.xlsx"
+        return "/home/glhf/Documents/repos/autojudge-research/examples/data/7cc4acfa-63fd-4acc-a1a1-e8e529e0a97f.xlsx"
 
     @pytest.fixture(autouse=True)
     def cleanup_cache(self):
         yield
         cache_dirs = [
-            Path.home() / ".automas" / "pdf_cache",
-            Path.home() / ".automas" / "docx_cache",
-            Path.home() / ".automas" / "pptx_cache",
-            Path.home() / ".automas" / "xlsx_cache",
-            Path.home() / ".automas" / "pdf_images",
-            Path.home() / ".automas" / "docx_images",
-            Path.home() / ".automas" / "pptx_images",
-            Path.home() / ".automas" / "xlsx_images",
+            Path.home() / ".autojudge" / "pdf_cache",
+            Path.home() / ".autojudge" / "docx_cache",
+            Path.home() / ".autojudge" / "pptx_cache",
+            Path.home() / ".autojudge" / "xlsx_cache",
+            Path.home() / ".autojudge" / "pdf_images",
+            Path.home() / ".autojudge" / "docx_images",
+            Path.home() / ".autojudge" / "pptx_images",
+            Path.home() / ".autojudge" / "xlsx_images",
         ]
         for cache_dir in cache_dirs:
             if cache_dir.exists():
@@ -157,7 +157,7 @@ class TestDocumentCaching:
         if not Path(pdf_file).exists():
             pytest.skip(f"Test file {pdf_file} not found")
 
-        cache_dir = Path.home() / ".automas" / "pdf_cache"
+        cache_dir = Path.home() / ".autojudge" / "pdf_cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
 
         file_hash = get_file_hash(pdf_file)

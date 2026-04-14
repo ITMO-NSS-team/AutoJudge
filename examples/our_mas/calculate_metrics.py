@@ -324,7 +324,7 @@ if __name__ == "__main__":
         "mas_complexity",
     ]
 
-    directory_path = "/home/user/Desktop/AutoMAS/AutoJudge/examples/GAIA/results/test_new_graph_generation_3_13_02_26"
+    directory_path = "/home/user/Desktop/autojudge/AutoJudge/examples/GAIA/results/test_new_graph_generation_3_13_02_26"
 
     for name_of_metric_high_level, name_of_metric_low_level in zip(
         system_metrics, agent_metrics

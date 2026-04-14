@@ -10,8 +10,8 @@ from dotenv import load_dotenv
 
 load_dotenv(".env")
 
-from automas.meta_agents import StepsBatchSummarizer
-from automas.utils import get_logger
+from autojudge.meta_agents import StepsBatchSummarizer
+from autojudge.utils import get_logger
 import json
 import pandas as pd
 from pydantic_ai.models.openai import OpenAIChatModel

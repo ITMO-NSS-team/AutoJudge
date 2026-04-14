@@ -11,11 +11,11 @@ from dotenv import load_dotenv
 
 load_dotenv(".env")
 
-from automas.meta_agents import PoolGenerator_WW
-from automas.pipeline import PipelineBuilder
-from automas.meta_agents import GraphGenerator
-from automas.utils.langfuse_utils import ainvoke_with_lf
-from automas.utils import get_logger
+from autojudge.meta_agents import PoolGenerator_WW
+from autojudge.pipeline import PipelineBuilder
+from autojudge.meta_agents import GraphGenerator
+from autojudge.utils.langfuse_utils import ainvoke_with_lf
+from autojudge.utils import get_logger
 from maseval import get_langfuse_judge_client
 import json
 import pandas as pd

@@ -2,7 +2,7 @@
 
 import pytest
 
-from automas.mcp.registry import (
+from autojudge.mcp.registry import (
     MCP_SERVERS,
     get_server_descriptions,
 )

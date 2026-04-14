@@ -1,8 +1,8 @@
 import asyncio
 
-from automas.meta_agents import GraphGenerator, PoolGenerator
-from automas.pipeline import PipelineBuilder
-from automas.utils.langfuse_utils import ainvoke_with_lf
+from autojudge.meta_agents import GraphGenerator, PoolGenerator
+from autojudge.pipeline import PipelineBuilder
+from autojudge.utils.langfuse_utils import ainvoke_with_lf
 from maseval import get_langfuse_download_client
 from maseval.parsers.langfuse_parser_v3 import parse_langfuse_task
 from dotenv import load_dotenv

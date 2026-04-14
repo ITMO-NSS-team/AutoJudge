@@ -1,8 +1,8 @@
 import pytest
 
-from automas.judge.base import JudgeResult
-from automas.judge.supervised_judge import SupervisedJudge
-from automas.pipeline.types import NodeTrace, PipelineTrace
+from autojudge.judge.base import JudgeResult
+from autojudge.judge.supervised_judge import SupervisedJudge
+from autojudge.pipeline.types import NodeTrace, PipelineTrace
 
 
 class TestSupervisedJudgeInitialization:

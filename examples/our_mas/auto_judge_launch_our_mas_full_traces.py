@@ -5,12 +5,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import asyncio
 
-from automas.meta_agents import PoolGenerator
-from automas.agent_pool import AgentPool
-from automas.pipeline.types import GraphDict
-from automas.pipeline import PipelineBuilder
-from automas.pipeline.node_session import NodeExecution, NodeSessionError
-from automas.utils import get_logger
+from autojudge.meta_agents import PoolGenerator
+from autojudge.agent_pool import AgentPool
+from autojudge.pipeline.types import GraphDict
+from autojudge.pipeline import PipelineBuilder
+from autojudge.pipeline.node_session import NodeExecution, NodeSessionError
+from autojudge.utils import get_logger
 from maseval import get_langfuse_download_client, get_langfuse_judge_client
 from maseval.parsers.langfuse_parser_v3 import parse_langfuse_task
 from dotenv import load_dotenv
@@ -488,7 +488,7 @@ async def main(
     save_folder: str,
     num_traces: int | None = None,
 ):
-    logger.info(f"Starting AutoMAS evaluation for task name: {name}")
+    logger.info(f"Starting autojudge evaluation for task name: {name}")
 
     pool_gen = PoolGenerator(
         output_schema=output_schema, taxonomy=taxonomy, examples=examples

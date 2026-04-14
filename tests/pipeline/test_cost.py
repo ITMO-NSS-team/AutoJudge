@@ -3,8 +3,8 @@ from unittest.mock import Mock, patch
 import pytest
 from pydantic_ai import RunUsage
 
-from automas import AgentNode
-from automas.pipeline.pipeline import Pipeline
+from autojudge import AgentNode
+from autojudge.pipeline.pipeline import Pipeline
 
 
 class TestPipelineCost:
@@ -21,7 +21,7 @@ class TestPipelineCost:
         assert cost.output_price == 0.0
         assert cost.total_price == 0.0
 
-    @patch("automas.pipeline.types.calc_price")
+    @patch("autojudge.pipeline.types.calc_price")
     def test_cost_calculates_single_node(self, mock_calc_price, simple_node):
         """Should calculate cost for single node execution"""
         mock_result = Mock()
@@ -42,7 +42,7 @@ class TestPipelineCost:
         assert cost.output_price == 0.02
         assert cost.total_price == 0.03
 
-    @patch("automas.pipeline.types.calc_price")
+    @patch("autojudge.pipeline.types.calc_price")
     def test_cost_sums_multiple_nodes(self, mock_calc_price, simple_node):
         """Should sum costs across multiple nodes"""
         mock_result1 = Mock()
@@ -84,7 +84,7 @@ class TestPipelineCost:
         assert cost.output_price == 0.0
         assert cost.total_price == 0.0
 
-    @patch("automas.pipeline.types.calc_price")
+    @patch("autojudge.pipeline.types.calc_price")
     def test_cost_extracts_provider_from_model(self, mock_calc_price, simple_node):
         """Should extract provider_id from model string"""
         mock_result = Mock()
@@ -105,7 +105,7 @@ class TestPipelineCost:
         assert call_args[1]["provider_id"] == "google"
         assert call_args[1]["model_ref"] == "google/gemini-2.5-flash"
 
-    @patch("automas.pipeline.types.calc_price")
+    @patch("autojudge.pipeline.types.calc_price")
     def test_cost_uses_openai_as_default_provider(self, mock_calc_price, simple_node):
         """Should use 'openai' as default provider when no slash in model"""
         mock_result = Mock()
@@ -125,7 +125,7 @@ class TestPipelineCost:
         call_args = mock_calc_price.call_args
         assert call_args[1]["provider_id"] == "openai"
 
-    @patch("automas.pipeline.types.calc_price")
+    @patch("autojudge.pipeline.types.calc_price")
     def test_cost_handles_calc_price_exception(self, mock_calc_price, simple_node):
         """Should handle exceptions from calc_price and continue"""
         mock_calc_price.side_effect = Exception("Model not found")

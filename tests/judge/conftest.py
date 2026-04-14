@@ -1,7 +1,7 @@
 import pytest
 
-from automas.judge.base import Judge, JudgeResult
-from automas.pipeline.types import NodeTrace, PipelineTrace
+from autojudge.judge.base import Judge, JudgeResult
+from autojudge.pipeline.types import NodeTrace, PipelineTrace
 
 TEST_MODEL = "openai/gpt-oss-120b"
 

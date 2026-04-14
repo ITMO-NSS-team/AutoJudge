@@ -1,6 +1,6 @@
 import pytest
 
-from automas.judge.base import Judge, JudgeResult
+from autojudge.judge.base import Judge, JudgeResult
 
 
 class TestJudgeResult:

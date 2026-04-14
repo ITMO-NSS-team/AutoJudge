@@ -11,15 +11,15 @@ from dotenv import load_dotenv
 
 load_dotenv(".env")
 
-from automas.meta_agents import PoolGenerator
-from automas.agent_pool import AgentPool
-from automas.pipeline.types import GraphDict
-from automas.pipeline import PipelineBuilder
-from automas.pipeline.node_session import NodeExecution, NodeSessionError
-from automas.utils.langfuse_utils import setup_langfuse_instrumentation
-from automas.utils import get_logger
+from autojudge.meta_agents import PoolGenerator
+from autojudge.agent_pool import AgentPool
+from autojudge.pipeline.types import GraphDict
+from autojudge.pipeline import PipelineBuilder
+from autojudge.pipeline.node_session import NodeExecution, NodeSessionError
+from autojudge.utils.langfuse_utils import setup_langfuse_instrumentation
+from autojudge.utils import get_logger
 from maseval import get_langfuse_judge_client
-from automas.db.db_tools import get_content_tool
+from autojudge.db.db_tools import get_content_tool
 from datasets import load_dataset
 
 logger = get_logger(__name__)
