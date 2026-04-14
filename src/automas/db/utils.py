@@ -5,7 +5,7 @@ import psycopg2
 from .config import DB_HOST, DB_NAME, DB_PASSWORD, DB_PORT, DB_USER
 
 
-def get_content_by_state(state_id, table_name="our_mas"):
+def get_content_by_state(state_id, table_name="agent_error"):
     """
     Fetches the 'content' field from the table for a given state_id.
     Returns a Python dict or None if not found.

@@ -531,7 +531,7 @@ if __name__ == "__main__":
 
     asyncio.run(
         main(
-            save_folder="alfworld",
+            save_folder="alfworld_full_trace",
             df=df_original,
             df_summary=df_summary,
             table_name="agent_error"

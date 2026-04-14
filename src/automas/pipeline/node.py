@@ -55,7 +55,7 @@ class AgentNode(UsageTrackingMixin):
         return Agent(
             name=self.name,
             model=model,
-            tools=tools,
+            # tools=tools,
             instructions=self.instructions,
             retries=3,
             instrument=True,

@@ -45,4 +45,4 @@ def check_table(table_name: str = "our_mas", limit: int = 5):
 
 
 if __name__ == "__main__":
-    check_table(table_name="our_mas")
+    check_table(table_name="agent_error")  # or who_when or trail

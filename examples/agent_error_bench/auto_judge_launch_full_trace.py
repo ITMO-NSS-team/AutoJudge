@@ -529,7 +529,7 @@ if __name__ == "__main__":
 
     asyncio.run(
         main(
-            save_folder="full_trace_gaia",
+            save_folder="gaia_full_trace",
             df=df_labels,
             df_full=messages,
             table_name="agent_error",

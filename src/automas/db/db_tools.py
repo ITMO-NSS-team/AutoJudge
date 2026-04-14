@@ -25,7 +25,7 @@ async def get_content_function(
         "REQUIRED: Database state_id (format: 'uuid_1', example: '5f982798-16b9-4051-ab57-cfc7ebdb2a91_1')",
     ],
     table_name: Annotated[
-        str, "REQUIRED: Table name (valid_options: 'our_mas', 'who_when', 'trail')"
+        str, "REQUIRED: Table name (valid_options: 'our_mas', 'who_when', 'trail', 'agent_error')"
     ],
 ) -> GetContentOutput:
     """
@@ -36,7 +36,7 @@ async def get_content_function(
     Args:
         state_id (str): REQUIRED state identifier from MAS trace/execution.
                     Format: "<uuid>_<step_number>" (example: "5f982798-16b9-4051-ab57-cfc7ebdb2a91_1")
-        table_name (str): Database table (only 'our_mas', 'who_when' or 'trail' allowed).
+        table_name (str): Database table (only 'our_mas', 'who_when', 'agent_error' or 'trail' allowed).
 
     Returns:
         GetContentOutput: Structured response with:
@@ -52,10 +52,12 @@ async def get_content_function(
         DatabaseError: Connection/query failures
         JSONDecodeError: Invalid JSON in content field
     """
-    VALID_TABLES = {"our_mas", "who_when", "trail"}
-    fallback_table = (
-        (VALID_TABLES - {table_name}).pop() if table_name in VALID_TABLES else None
-    )
+    VALID_TABLES = {"agent_error"}
+    # fallback_table = (
+    #     (VALID_TABLES - {table_name}).pop() if table_name in VALID_TABLES else None
+    # )
+    fallback_table = ["agent_error"]
+    table_name="agent_error"
 
     try:
         conn = psycopg2.connect(
@@ -70,6 +72,8 @@ async def get_content_function(
         tables_to_try = [table_name]
         if fallback_table:
             tables_to_try.append(fallback_table)
+            print('Attention, use fallback: ', fallback_table[0])
+        print('Use table: ', table_name)
 
         for tbl in tables_to_try:
             cur.execute(f"SELECT content FROM {tbl} WHERE state_id = %s", (state_id,))
