@@ -5,55 +5,20 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import MappingProxyType
-from typing import Any, get_args
 from copy import deepcopy
 
 from autojudge.agent_pool import AgentPool
-from autojudge.judge.base import JudgeResult, ScoreValue
 from autojudge.pipeline.types import PipelineTrace
-
-
-@dataclass(frozen=True, slots=True)
-class QualityScore:
-    """Normalised quality paired with the originating judge label."""
-    value: float
-    label: ScoreValue | None
-
-
-_SCORE_TO_VALUE: dict[ScoreValue, float] = {
-    value: JudgeResult(score=value, justification="").numeric_score
-    for value in get_args(ScoreValue)
-}
-
-
-def normalise_quality(value: ScoreValue | JudgeResult | float) -> QualityScore:
-    """Return a normalised score in ``[0, 1]`` with the original label."""
-    if isinstance(value, JudgeResult):
-        label = value.score
-        numeric = _SCORE_TO_VALUE[label]
-        return QualityScore(numeric, label)
-
-    if isinstance(value, str):
-        label = value
-        try:
-            numeric = _SCORE_TO_VALUE[label]
-        except KeyError as exc:  # pragma: no cover - defensive guard
-            raise ValueError(f"Unknown quality label: {label}") from exc
-        return QualityScore(numeric, label)
-
-    numeric_value = float(value)
-    clamped = max(0.0, min(1.0, numeric_value))
-    return QualityScore(clamped, None)
 
 
 @dataclass(frozen=True, slots=True)
 class EvaluationTelemetry:
     """Persisted evaluation details for optimisation history."""
-    quality: QualityScore
+    quality: dict
     cost: float
     budget_spent: float
     trace: PipelineTrace
-    judge_result: JudgeResult
+    judge_result: dict
     timestamp: datetime
     result_output: Any | None = None
     latency_seconds: float | None = None
