@@ -9,7 +9,7 @@ from automas.pipeline.node import AgentNode
 from automas.utils import get_logger
 
 from .base import DEFAULT_MODEL, BaseMetaAgent
-from .prompt_registry import DEFAULT_POOL_INSTRUCT_EXTENDED
+from .prompt_registry import DEFAULT_POOL_INSTRUCT_EXTENDED, DEFAULT_POOL_INSTRUCT_EXTENDED_no_db_tool
 
 logger = get_logger()
 
@@ -29,10 +29,12 @@ class PoolGenerator(BaseMetaAgent):
         output_schema: str = "",
         taxonomy: str = "",
         examples: str = "",
+        use_summary: bool = False
     ):
         print(
-            f"Initializing PoolGenerator with model={model}, temperature={temperature}"
+            f"Initializing PoolGenerator with model={model}, temperature={temperature}, summary: {use_summary}"
         )
+        self.summary = use_summary
         self.schema = output_schema
         self.taxonomy = taxonomy
         self.examples = examples
@@ -42,13 +44,20 @@ class PoolGenerator(BaseMetaAgent):
         )
 
     def _get_system_prompt(self) -> str:
-        mcp_servers_desc = get_server_descriptions()
-        return DEFAULT_POOL_INSTRUCT_EXTENDED.substitute(
-            mcp_servers_desc=mcp_servers_desc,
+        if not(self.summary): 
+            return DEFAULT_POOL_INSTRUCT_EXTENDED_no_db_tool.substitute(
             taxonomy=self.taxonomy,
             judge_output_format=self.schema,
             examples=self.examples,
         )
+        else:
+            mcp_servers_desc = get_server_descriptions()
+            return DEFAULT_POOL_INSTRUCT_EXTENDED.substitute(
+                mcp_servers_desc=mcp_servers_desc,
+                taxonomy=self.taxonomy,
+                judge_output_format=self.schema,
+                examples=self.examples,
+            )
 
     def _get_output_type(self):
         return list[AgentSchema]
@@ -66,7 +75,8 @@ class PoolGenerator(BaseMetaAgent):
                 name=schema.name,
                 instructions=schema.instructions,
                 model=schema.model,
-                mcp_tools=schema.mcp_tools,
+                # TODO: temp!
+                mcp_tools=[schema.mcp_tools],
             )
             for schema in agent_schemas
         ]
