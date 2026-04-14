@@ -1,5 +1,4 @@
 import os
-from string import Template
 from typing import List, Optional
 
 from pydantic import BaseModel
@@ -10,7 +9,7 @@ from autojudge.pipeline.node import AgentNode
 from autojudge.utils import get_logger
 
 from .base import BaseMetaAgent
-from .prompts import DEFAULT_POOL_INSTRUCT_EXTENDED
+from .prompts import DEFAULT_POOL_INSTRUCT_EXTENDED, DEFAULT_POOL_INSTRUCT_EXTENDED_no_db_tool
 
 logger = get_logger()
 
@@ -20,7 +19,6 @@ class AgentSchema(BaseModel):
     instructions: str
     mcp_tools: List[str] = []
     model: str = os.getenv("AGENT_NODE_MODEL", "google/gemini-2.5-flash")
-    use_tools: bool = True
 
 
 class PoolGenerator(BaseMetaAgent):
@@ -31,28 +29,35 @@ class PoolGenerator(BaseMetaAgent):
         output_schema: str = "",
         taxonomy: str = "",
         examples: str = "",
-        use_tools: bool = True,
-        prompt_template: Optional[Template] = None,
+        use_summary: bool = False
     ):
+        print(
+            f"Initializing PoolGenerator with model={model}, temperature={temperature}, summary: {use_summary}"
+        )
+        self.summary = use_summary
         self.schema = output_schema
         self.taxonomy = taxonomy
         self.examples = examples
-        self.use_tools = use_tools
-        self.pool_instruct = prompt_template or DEFAULT_POOL_INSTRUCT_EXTENDED
-
         super().__init__(
             model=model,
             temperature=temperature,
         )
 
     def _get_system_prompt(self) -> str:
-        mcp_servers_desc = get_server_descriptions()
-        return self.pool_instruct.substitute(
-            mcp_servers_desc=mcp_servers_desc,
+        if not(self.summary): 
+            return DEFAULT_POOL_INSTRUCT_EXTENDED_no_db_tool.substitute(
             taxonomy=self.taxonomy,
             judge_output_format=self.schema,
             examples=self.examples,
         )
+        else:
+            mcp_servers_desc = get_server_descriptions()
+            return DEFAULT_POOL_INSTRUCT_EXTENDED.substitute(
+                mcp_servers_desc=mcp_servers_desc,
+                taxonomy=self.taxonomy,
+                judge_output_format=self.schema,
+                examples=self.examples,
+            )
 
     def _get_output_type(self):
         return list[AgentSchema]
@@ -70,11 +75,11 @@ class PoolGenerator(BaseMetaAgent):
                 name=schema.name,
                 instructions=schema.instructions,
                 model=schema.model,
-                mcp_tools=schema.mcp_tools,
-                use_tools=self.use_tools,
+                mcp_tools=[schema.mcp_tools],
             )
             for schema in agent_schemas
         ]
+
 
     async def create_pool(
         self, task_description: str, context: Optional[str] = None
@@ -85,7 +90,6 @@ class PoolGenerator(BaseMetaAgent):
             user_prompt += f"\n\nPREVIOUS ATTEMPT FEEDBACK:\n{context}"
 
         agent_schemas = await self._run_agent(user_prompt)
-
         agents = self._create_agents(agent_schemas)
 
         logger.info(f"Successfully created agent pool with {len(agents)} agents")
