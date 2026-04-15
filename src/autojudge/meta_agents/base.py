@@ -8,7 +8,6 @@ from pydantic_ai import Agent, ModelSettings, RunUsage
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 
-from autojudge.mcp.registry import get_mcp_toolsets
 from autojudge.pipeline.types import UsageTrackingMixin
 from autojudge.utils.langfuse_utils import setup_langfuse_instrumentation
 
@@ -72,10 +71,6 @@ class BaseMetaAgent(UsageTrackingMixin, ABC):
     def _create_agent(self) -> Agent:
         system_prompt = self._get_system_prompt()
         output_type = self._get_output_type()
-        mcp_tools = self._get_mcp_tools()
-
-        # Get toolsets if MCP tools are specified
-        toolsets = get_mcp_toolsets(mcp_tools) if mcp_tools else []
 
         return Agent(
             name=self.__class__.__name__,
@@ -84,7 +79,6 @@ class BaseMetaAgent(UsageTrackingMixin, ABC):
             system_prompt=system_prompt,
             retries=self.retries,
             instrument=True,
-            toolsets=toolsets,
         )
 
     @abstractmethod

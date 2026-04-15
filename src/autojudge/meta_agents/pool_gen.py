@@ -4,7 +4,6 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 from autojudge.agent_pool import AgentPool
-from autojudge.mcp.registry import get_server_descriptions
 from autojudge.pipeline.node import AgentNode
 from autojudge.utils import get_logger
 
@@ -44,16 +43,14 @@ class PoolGenerator(BaseMetaAgent):
         )
 
     def _get_system_prompt(self) -> str:
-        if not(self.summary): 
+        if not(self.summary):
             return DEFAULT_POOL_INSTRUCT_EXTENDED_no_db_tool.substitute(
             taxonomy=self.taxonomy,
             judge_output_format=self.schema,
             examples=self.examples,
         )
         else:
-            mcp_servers_desc = get_server_descriptions()
             return DEFAULT_POOL_INSTRUCT_EXTENDED.substitute(
-                mcp_servers_desc=mcp_servers_desc,
                 taxonomy=self.taxonomy,
                 judge_output_format=self.schema,
                 examples=self.examples,

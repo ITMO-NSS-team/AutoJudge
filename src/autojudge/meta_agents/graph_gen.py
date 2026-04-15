@@ -1,6 +1,5 @@
 from typing import TYPE_CHECKING, Optional
 
-from autojudge.mcp.registry import get_server_descriptions
 from autojudge.pipeline.pipeline_builder import PipelineBuilder
 from autojudge.pipeline.types import GraphDict
 from autojudge.utils.logger import get_logger
@@ -27,8 +26,7 @@ class GraphGenerator(BaseMetaAgent):
         )
 
     def _get_system_prompt(self) -> str:
-        mcp_servers_desc = get_server_descriptions()
-        return DEFAULT_GRAPH_INSTRUCT.substitute(mcp_servers_desc=mcp_servers_desc)
+        return DEFAULT_GRAPH_INSTRUCT.substitute()
 
     def _get_output_type(self):
         return GraphDict
