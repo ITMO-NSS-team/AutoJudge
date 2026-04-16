@@ -39,7 +39,9 @@ def download_webarena_dataset(output_dir: Path) -> Path:
             repo_id="McGill-NLP/agent-reward-bench",
             repo_type="dataset",
             local_dir=temp_download,
-            allow_patterns="cleaned/webarena/**/*.json",
+            allow_patterns=[
+                "cleaned/webarena/GenericAgent-*/GenericAgent-*/*.json",
+            ],
             ignore_patterns=[
                 "cleaned/assistantbench/*",
                 "cleaned/visualwebarena/*",
@@ -55,20 +57,27 @@ def download_webarena_dataset(output_dir: Path) -> Path:
             input_dir.mkdir(parents=True, exist_ok=True)
             import shutil
 
+            # Iterate through all agent directories and collect all traces
+            json_count = 0
             for agent_dir in webarena_path.iterdir():
-                if agent_dir.is_dir():
+                if agent_dir.is_dir() and agent_dir.name.startswith("GenericAgent-"):
+                    # Create agent subdirectory to preserve agent info
+                    agent_subdir = input_dir / agent_dir.name
+                    agent_subdir.mkdir(exist_ok=True)
+
+                    # Each agent has task directories
                     for task_dir in agent_dir.iterdir():
                         if task_dir.is_dir():
                             # Extract JSON files from task directory
                             for json_file in task_dir.glob("*.json"):
-                                dest = input_dir / json_file.name
-                                if dest.exists():
-                                    dest.unlink()
+                                # Save under agent subdirectory
+                                dest = agent_subdir / json_file.name
                                 shutil.copy2(str(json_file), str(dest))
+                                json_count += 1
 
             # Clean up temp
             shutil.rmtree(temp_download)
-            logger.info(f"✓ Dataset extracted to {input_dir}")
+            logger.info(f"✓ Dataset extracted to {input_dir} ({json_count} traces from 4 agents)")
             return input_dir
         else:
             raise ValueError("WebArena data not found in downloaded dataset")
@@ -225,10 +234,10 @@ def prune_trajectories(input_dir: Path, output_dir: Path, test_mode: bool = Fals
                 step.pop("axtree_pruned", None)
                 step.pop("axtree_obj", None)
 
-            # Save pruned version (compact, no pretty-print)
+            # Save pruned version with proper formatting
             save_path = output_dir / json_file.name
-            with open(save_path, "wb") as f:
-                f.write(orjson.dumps(data))
+            with open(save_path, "w") as f:
+                json.dump(data, f, indent=2)
 
             pruned += 1
         except Exception as e:
