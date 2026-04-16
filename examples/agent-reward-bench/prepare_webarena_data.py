@@ -39,28 +39,39 @@ def download_webarena_dataset(output_dir: Path) -> Path:
             repo_id="McGill-NLP/agent-reward-bench",
             repo_type="dataset",
             local_dir=temp_download,
-            allow_patterns="data/webarena/*",
-            ignore_patterns=["data/assistantbench/*", "data/annotations.csv"],
+            allow_patterns="cleaned/webarena/**/*.json",
+            ignore_patterns=[
+                "cleaned/assistantbench/*",
+                "cleaned/visualwebarena/*",
+                "cleaned/workarena/*",
+                "judgments/*",
+                "data/*",
+            ],
         )
 
         # Move downloaded files to input/
-        webarena_path = temp_download / "data" / "webarena"
+        webarena_path = temp_download / "cleaned" / "webarena"
         if webarena_path.exists():
             input_dir.mkdir(parents=True, exist_ok=True)
             import shutil
 
-            for item in webarena_path.iterdir():
-                dest = input_dir / item.name
-                if dest.exists():
-                    shutil.rmtree(dest) if dest.is_dir() else dest.unlink()
-                shutil.move(str(item), str(dest))
+            for agent_dir in webarena_path.iterdir():
+                if agent_dir.is_dir():
+                    for task_dir in agent_dir.iterdir():
+                        if task_dir.is_dir():
+                            # Extract JSON files from task directory
+                            for json_file in task_dir.glob("*.json"):
+                                dest = input_dir / json_file.name
+                                if dest.exists():
+                                    dest.unlink()
+                                shutil.copy2(str(json_file), str(dest))
 
             # Clean up temp
             shutil.rmtree(temp_download)
             logger.info(f"✓ Dataset extracted to {input_dir}")
             return input_dir
         else:
-            raise ValueError("WebarArena data not found in downloaded dataset")
+            raise ValueError("WebArena data not found in downloaded dataset")
     except Exception as e:
         logger.error(f"Failed to download: {e}")
         raise
