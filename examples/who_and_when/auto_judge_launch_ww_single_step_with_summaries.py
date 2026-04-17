@@ -33,10 +33,9 @@ from maseval import get_langfuse_judge_client
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 from autojudge.meta_agents.prompts import examples_tools as examples
 from autojudge.meta_agents.prompts import ww_output_schema, ww_taxonomy
+from autojudge.meta_agents.graph_gen import get_parallel_graph
 
 logger = get_logger(__name__)
-
-
 
 def _serialize_pipeline_trace(pipeline) -> list:
     """Serialize per-node message histories from a completed pipeline."""

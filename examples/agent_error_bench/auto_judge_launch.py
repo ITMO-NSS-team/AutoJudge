@@ -20,21 +20,9 @@ import json
 import pandas as pd
 from autojudge.meta_agents.prompts import examples_tools as examples
 from autojudge.meta_agents.prompts import ae_output_schema, ae_taxonomy
+from autojudge.meta_agents.graph_gen import get_parallel_graph
 
 logger = get_logger(__name__)
-
-
-def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
-    graph_dict = {}
-    _agents_info = agent_pool.full_agents_data
-
-    for agent in _agents_info:
-        if agent["name"] != "FINAL_AGGREGATOR":
-            graph_dict[agent["name"]] = ["FINAL_AGGREGATOR"]
-
-    graph_dict["FINAL_AGGREGATOR"] = []
-
-    return graph_dict
 
 
 async def main(

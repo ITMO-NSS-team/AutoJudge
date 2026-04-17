@@ -13,6 +13,18 @@ if TYPE_CHECKING:
 
 logger = get_logger()
 
+def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
+    graph_dict: GraphDict = {}
+    _agents_info = agent_pool.full_agents_data
+
+    for agent in _agents_info:
+        if agent.get("name") != "FINAL_AGGREGATOR":
+            graph_dict[agent.get("name")] = ["FINAL_AGGREGATOR"]
+
+    graph_dict["FINAL_AGGREGATOR"] = []
+
+    return graph_dict
+
 
 class GraphGenerator(BaseMetaAgent):
     def __init__(

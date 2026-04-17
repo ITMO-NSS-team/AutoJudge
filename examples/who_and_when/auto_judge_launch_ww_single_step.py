@@ -36,10 +36,9 @@ from maseval import get_langfuse_judge_client
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 from autojudge.meta_agents.prompts import examples_no_tools as examples
 from autojudge.meta_agents.prompts import ww_output_schema, ww_taxonomy
+from autojudge.meta_agents.graph_gen import get_parallel_graph
 
 logger = get_logger(__name__)
-
-
 
 def _serialize_pipeline_trace(pipeline) -> list:
     """Serialize per-node message histories from a completed pipeline."""
@@ -60,26 +59,12 @@ def _serialize_pipeline_trace(pipeline) -> list:
         })
     return result
 
-
-def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
-    graph_dict: GraphDict = {}
-    for agent in agent_pool.full_agents_data:
-        if agent["name"] != "FINAL_AGGREGATOR":
-            graph_dict[agent["name"]] = ["FINAL_AGGREGATOR"]
-    graph_dict["FINAL_AGGREGATOR"] = []
-    return graph_dict
-
-
 def _strip_fences(text: str) -> str:
     t = text.strip()
     if t.startswith("```"):
         lines = t.splitlines()
         t = "\n".join(lines[1:-1]).strip()
     return t
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 
 async def main(save_folder: str, df, df_summary=None, split: str = "algo", test_mode: bool = False):
     logger.info("===Starting Who&When evaluation (single-step sequential with early stopping)===")
@@ -132,9 +117,6 @@ async def main(save_folder: str, df, df_summary=None, split: str = "algo", test_
                 ground_truth = row.get("ground_truth", "")
                 correct_answer = str(row.get("is_correct", ""))
 
-            # ------------------------------------------------------------------
-            # Generate judge pool ONCE for this trace (uses first step as sample)
-            # ------------------------------------------------------------------
             sample_input = {
                 "query": query,
                 "step_index": 1,
@@ -176,9 +158,7 @@ async def main(save_folder: str, df, df_summary=None, split: str = "algo", test_
                 f"folder:{save_folder}",
             ]
 
-            # ------------------------------------------------------------------
-            # Outer Langfuse span for this trace
-            # ------------------------------------------------------------------
+
             with judge_client.start_as_current_span(
                 name=f"evaluate_task_{task_id}",
                 input={"task_id": task_id, "n_steps": len(history_for_judges)},
@@ -191,9 +171,6 @@ async def main(save_folder: str, df, df_summary=None, split: str = "algo", test_
                 step_results: list[dict] = []
                 last_pipeline = None
 
-                # --------------------------------------------------------------
-                # Step-by-step loop with early stop
-                # --------------------------------------------------------------
                 for step_index, step_str in enumerate(history_for_judges, start=1):
                     logger.info(f"  Evaluating step {step_index}/{len(history_for_judges)}...")
 
@@ -252,9 +229,6 @@ async def main(save_folder: str, df, df_summary=None, split: str = "algo", test_
                 )
                 span.end()
 
-            # ------------------------------------------------------------------
-            # Build final answer in same {agent, step, reason} shape as other scripts
-            # ------------------------------------------------------------------
             if guilty_result is not None:
                 final_score = {
                     "agent": guilty_result.get("agent", ""),
@@ -320,9 +294,6 @@ async def main(save_folder: str, df, df_summary=None, split: str = "algo", test_
             )
             print(f"\n!  Failed task {idx + 1}/{len(df)}: {task_id}\n   Error: {error_msg}\n")
 
-    # --------------------------------------------------------------------------
-    # Write failed_traces.txt
-    # --------------------------------------------------------------------------
     if failed_traces:
         local_results_dir.mkdir(parents=True, exist_ok=True)
         failed_file = local_results_dir / "failed_traces.txt"
@@ -343,10 +314,6 @@ async def main(save_folder: str, df, df_summary=None, split: str = "algo", test_
         f"Done: {len(df) - total_failed}/{len(df)} successful, {total_failed} failed"
     )
 
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Sequential single-step evaluation with early stopping."

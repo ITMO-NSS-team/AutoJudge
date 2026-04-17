@@ -67,8 +67,7 @@ def build_text_generic(row: dict) -> str:
 
 
 
-# ---------- dataset loaders -----------------------------------------------
-
+# dataset loaders 
 def load_who_and_when(sample: int | None) -> Iterable[dict]:
     from datasets import load_dataset
 
@@ -179,7 +178,7 @@ def get_token_counter(model: str) -> tuple[Callable[[str], int], str]:
             return (lambda text: max(1, len(text) // 4)), "char/4 estimate"
 
 
-# ---------- output token estimation ------------------------------------
+# output token estimation
 
 def estimate_output_tokens(dataset: str, count_fn: Callable[[str], int]) -> int:
     """

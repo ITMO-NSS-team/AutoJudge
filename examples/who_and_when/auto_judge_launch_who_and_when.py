@@ -21,21 +21,9 @@ import pandas as pd
 from toon_format import encode
 from autojudge.meta_agents.prompts import examples_no_tools as examples
 from autojudge.meta_agents.prompts import ww_output_schema, ww_taxonomy
+from autojudge.meta_agents.graph_gen import get_parallel_graph
 
 logger = get_logger(__name__)
-
-def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
-    graph_dict = {}
-    _agents_info = agent_pool.full_agents_data
-
-    for agent in _agents_info:
-        if agent["name"] != "FINAL_AGGREGATOR":
-            graph_dict[agent["name"]] = ["FINAL_AGGREGATOR"]
-
-    graph_dict["FINAL_AGGREGATOR"] = []
-
-    return graph_dict
-
 
 async def main(
     save_folder: str, df, df_summary, table_name: str, num_traces: int | None = None

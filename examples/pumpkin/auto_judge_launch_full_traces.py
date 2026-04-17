@@ -16,6 +16,8 @@ from maseval.parsers.langfuse_parser_v3 import parse_langfuse_task
 from autojudge.meta_agents.prompts import examples_no_tools as examples
 from autojudge.meta_agents.prompts import pumpkin_output_schema, pumpkin_taxonomy
 from dotenv import load_dotenv
+from autojudge.meta_agents.graph_gen import get_parallel_graph
+
 import json
 import os
 
@@ -27,19 +29,6 @@ FINAL_AGENT_ONLY_ATTEMPTS = 8
 MISSING_DEPENDENCY_RECOVERY_ATTEMPTS = 3
 DEPENDENCY_NODE_ATTEMPTS = 5
 TRANSIENT_ERROR_RETRY_DELAY_SECONDS = 1.5
-
-
-def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
-    graph_dict = {}
-    _agents_info = agent_pool.full_agents_data
-
-    for agent in _agents_info:
-        if agent["name"] != "FINAL_AGGREGATOR":
-            graph_dict[agent["name"]] = ["FINAL_AGGREGATOR"]
-
-    graph_dict["FINAL_AGGREGATOR"] = []
-
-    return graph_dict
 
 
 def build_history_for_evaluating(query) -> str:
