@@ -1,10 +1,10 @@
-import json
 import glob
-import pandas as pd
+import json
 from pathlib import Path
 
+import pandas as pd
+
 df = pd.read_parquet("hf://datasets/Kevin355/Who_and_When/Hand-Crafted.parquet")
-df = df[:30]
 # df = pd.read_parquet("hf://datasets/Kevin355/Who_and_When/Algorithm-Generated.parquet")
 
 path = str(

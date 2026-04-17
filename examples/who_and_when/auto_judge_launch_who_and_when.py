@@ -5,245 +5,37 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import asyncio
 import os
+
 from dotenv import load_dotenv
 
 load_dotenv(".env")
 
-from automas.meta_agents import PoolGenerator
-from automas.pipeline import PipelineBuilder
-from automas.agent_pool import AgentPool
-from automas.pipeline.types import GraphDict
-from automas.utils.langfuse_utils import ainvoke_with_lf
-from automas.utils import get_logger
-from maseval import get_langfuse_judge_client
 import json
+
 import pandas as pd
+from maseval import get_langfuse_judge_client
 from toon_format import encode
 
+from autojudge.agent_pool import AgentPool
+from autojudge.meta_agents import PoolGenerator
+from autojudge.meta_agents.graph_gen import get_parallel_graph
+from autojudge.meta_agents.prompts import examples_no_tools as examples
+from autojudge.meta_agents.prompts import ww_output_schema, ww_taxonomy
+from autojudge.pipeline import PipelineBuilder
+from autojudge.pipeline.types import GraphDict
+from autojudge.utils import get_logger
+from autojudge.utils.langfuse_utils import ainvoke_with_lf
+
 logger = get_logger(__name__)
-
-taxonomy = """
-1) Guilty agent
-2) Step of error
-"""
-
-output_schema = """
-**OUTPUT FORMAT - STRICTLY REQUIRED:**
-You must determine the most guilty agent in the evaluated 'history_for_evaluating', based on what the other judges wrote. You MUST return ONLY a valid JSON object with exactly these three fields:
-{
-  "agent": "Guilty Agent name from trace here",
-  "step": "integer number (1, 2, 3...) of the message in trace sequence",
-  "reason": "reason of your prediction"
-}
-
-**CRITICAL RULES:**
-- Return ONLY the JSON object, nothing else
-- NO markdown code fences (no ```json or ```)
-- NO explanatory text before or after the JSON
-- NO additional fields (no score, no confidence, no metadata)
-- agent must be the exact agent name as it appears in the trace
-- step must be a plain integer string: "1", "2", "3", etc.
-
-**STEP RULE:** This is the sequential position of the message in 'history_for_evaluating' (1 = first message, 2 = second message, etc). Use ONLY integers. Do NOT use IDs, UUIDs, strings, or any other identifiers.
-
-**VALID EXAMPLE:**
-{
-  "agent": "File_Surfer",
-  "step": "1", 
-  "reason": "The agent fails to collect price data for the daily tickets and season passes for California's Great America in 2024."
-}
-
-
-INVALID EXAMPLES (DO NOT USE THIS FORMAT):
-```json
-{
-  "agent": "Orchestrator",
-  "step": "21",
-  "reason": "The Orchestrator is the most guilty agent. Despite the WebSurfer's repeated failures to find clear Vudu listings for 'The Tenant' and 'Nosferatu the Vampyre' (as noted in steps 13 and 17), and the subsequent 'ResponsibleAIPolicyViolation' error in step 21, the Orchestrator still allowed the final answer to be 'The Tenant' without any verified evidence of its availability on Vudu. This indicates a failure in the Orchestrator's decision-making process to ensure all constraints were met before providing a final answer. The Orchestrator also repeatedly asked the WebSurfer to check for Vudu availability without changing its strategy, indicating a lack of progress and looping, as highlighted by the Search Integrity Judge."
-}
-```
-
-**INVALID STEP EXAMPLES:** "step1", "abc-123", "task_id_45", "first" — ONLY USE: "1", "2", "3", etc.
-"""
-
-examples = """
-Example 1 - MAS Task Completion Evaluation:
-[
-  {
-    "name": "MAS_TASK_COMPLETION_JUDGE",
-    "instructions": "**Instruction**:
-Evaluate whether the multi-agent system fully completed the user's task by assessing end-to-end outcome across all agents.
-
-**Evaluation Criteria**:
-1. *Task Relevance* - Does output address the main objective?
-2. *Completeness* - Are all required subtasks/steps present?
-3. *Consistency* - Are agent outputs logically coherent without contradictions?
-4. *Actionability* - Can the user act on outputs to achieve their goal?
-5. *Efficiency* - Were tasks completed without unnecessary duplication?
-
-You must use the available tools at least once!
-
-**Scoring**:
-- \"ideal\": Task fully achieved, all subtasks addressed, outputs consistent and actionable
-- \"fair\": Task largely achieved but minor omissions or slight inconsistencies
-- \"poor\": Task failed, critical steps missing, inconsistent or unusable outputs
-
-Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": [get_content_tool]
-  }
-]
-
-Example 2 - MAS Complexity Assessment:
-[
-  {
-    "name": "MAS_COMPLEXITY_JUDGE",
-    "instructions": "**Instruction**:
-Evaluate complexity and interconnectedness of the multi-agent system.
-
-**Evaluation Criteria**:
-1. *Agent Density* - Is number of agents appropriate for system scope?
-2. *Interconnection Quality* - Are agent connections well-designed and efficient?
-3. *System Scalability* - Can architecture accommodate growth and maintainability?
-
-You must use the available tools at least once!
-
-**Scoring**:
-- \"ideal\": Complexity perfectly balanced with optimal density and connections
-- \"fair\": Complexity manageable but has scalability or efficiency issues
-- \"poor\": Complexity poorly managed with density or connection problems
-
-Return single JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": [get_content_tool]
-  }
-]
-
-Example 3 - Tool Performance Evaluation:
-[
-  {
-    "name": "TOOL_PERFORMANCE_JUDGE",
-    "instructions": "**Instruction**:
-Assess whether tools successfully fulfilled user requests by evaluating execution outcome quality.
-
-**Evaluation Criteria**:
-1. *Task Completion* - Did tool fully accomplish the request?
-2. *Accuracy* - Is output accurate, relevant, and logically consistent?
-3. *Clarity* - Is output clear, structured, and in expected format?
-4. *Failure Handling* - Any errors or unrelated information returned?
-
-You must use the available tools at least once!
-
-**Scoring** (strict - zero tolerance for errors):
-- \"ideal\": Output perfectly solves task, all parts correct and complete
-- \"fair\": Output mostly correct but minor issues or omissions
-- \"poor\": Output fails task, incorrect, incomplete, or misleading
-
-Return JSON list: [{\"state_id\": \"...\", \"justification\": \"...\", \"score\": \"ideal|fair|poor\"}]",
-    "mcp_tools": [get_content_tool]
-  }
-]
-
-Example 4 - Environment Setup Error Detection:
-[
-  {
-    "name": "MAS_ENVIRONMENT_SETUP_JUDGE",
-    "instructions": "**Instruction**:
-Analyze execution trace to identify environment setup and configuration errors that occurred BEFORE or DURING initialization.
-
-**Scope**: Focus on initialization phase errors, NOT runtime API errors.
-
-**Evaluation Criteria** - Look for trace entries showing:
-1. *File System Issues* - Permission denied, access errors (PermissionError, errno 13)
-2. *Credential Problems* - Missing API keys in config (KeyError: 'API_KEY')
-3. *Environment Variables* - Missing or invalid env vars (os.environ KeyError)
-4. *Config Files* - Missing or malformed configs (FileNotFoundError, JSONDecodeError)
-5. *Dependencies* - Import errors or version conflicts (ModuleNotFoundError)
-You must use the available tools at least once!
-
-**Out of Scope**: HTTP status codes (401, 403, 429, 500), runtime API errors, network timeouts
-
-**Scoring**:
-- \"ideal\": No setup errors, clean initialization
-- \"fair\": Minor warnings but system recovered with defaults
-- \"poor\": Critical setup errors prevented system startup
-
-Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": [get_content_tool]
-  }
-]
-
-Example 5 - API Issues Detection:
-[
-  {
-    "name": "MAS_API_ISSUES_JUDGE",
-    "instructions": "**Instruction**:
-Analyze execution trace to identify API-related errors during RUNTIME execution.
-
-**Scope**: Focus on runtime API communication errors, NOT initialization/config errors.
-You must use the available tools at least once!
-
-**Evaluation Criteria** - Look for trace entries showing:
-1. *Rate Limiting* - HTTP 429, "Rate limit exceeded" (RateLimitError)
-2. *Auth Errors* - HTTP 401/403 during API calls, "Invalid token" (AuthenticationError)
-3. *Server Errors* - HTTP 500/502/503/504, "Internal Server Error"
-4. *Not Found* - HTTP 404, "Endpoint not found"
-5. *Client Errors* - HTTP 400/422, "Bad Request", "Validation failed"
-6. *Network Failures* - Connection timeout, "Connection refused" (ConnectionError)
-
-**Out of Scope**: Environment variable errors, config file issues, local file permissions
-
-**Scoring**:
-- \"ideal\": No API errors, all external calls succeeded
-- \"fair\": Minor/temporary API errors but system recovered
-- \"poor\": Critical API errors prevented task completion or occurred repeatedly
-
-Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": []
-  }
-]
-
-Example 6 - Tool Selection Evaluation:
-[
-  {
-    "name": "TOOL_SELECTION_JUDGE",
-    "instructions": "**Instruction**:
-Assess whether tool selections made by the agent are appropriate for the task.
-
-**Evaluation Criteria**:
-1. *Tool Relevance* - Does the selected tool directly address the node_role responsibility?
-2. *Pipeline Position* - Is the tool suitable given the agent's position in the pipeline?
-3. *Justification* - Is the tool selection clearly supported by the task requirements?
-
-**Scoring**:
-- \"ideal\": Tool selection perfectly matches node_role and is clearly justified
-- \"fair\": Selection is relevant but potentially suboptimal for the task
-- \"poor\": Selection is inappropriate or clearly mismatched to node_role
-
-Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": []
-  }
-]"""
-
-
-def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
-    graph_dict = {}
-    _agents_info = agent_pool.full_agents_data
-
-    for agent in _agents_info:
-        if agent["name"] != "FINAL_AGGREGATOR":
-            graph_dict[agent["name"]] = ["FINAL_AGGREGATOR"]
-
-    graph_dict["FINAL_AGGREGATOR"] = []
-
-    return graph_dict
 
 
 async def main(
     save_folder: str, df, df_summary, table_name: str, num_traces: int | None = None
 ):
-    logger.info(f"===Starting Who&When evaluation===")
+    logger.info("===Starting Who&When evaluation===")
 
     pool_gen = PoolGenerator(
-        output_schema=output_schema, taxonomy=taxonomy, examples=examples
+        output_schema=ww_output_schema, taxonomy=ww_taxonomy, examples=examples
     )
     judge_client = get_langfuse_judge_client()
     logger.info("Initialized generators and Langfuse client")

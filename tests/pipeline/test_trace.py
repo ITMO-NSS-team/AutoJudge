@@ -1,7 +1,7 @@
 import pytest
 
-from automas.pipeline.pipeline import Pipeline
-from automas.pipeline.types import NodeTrace, PipelineTrace
+from autojudge.pipeline.pipeline import Pipeline
+from autojudge.pipeline.types import NodeTrace, PipelineTrace
 
 
 class TestNodeTrace:

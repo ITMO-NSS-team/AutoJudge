@@ -1,7 +1,7 @@
 import pytest
 
-from automas.pipeline.node import AgentNode
-from automas.pipeline.types import NodeTrace, PipelineTrace
+from autojudge.pipeline.node import AgentNode
+from autojudge.pipeline.types import NodeTrace, PipelineTrace
 
 TEST_MODEL = "openai/gpt-oss-20b:free"
 
