@@ -13,6 +13,8 @@ from .pool_prompts import (
     DEFAULT_POOL_INSTRUCT_EXTENDED_WW,
     DEFAULT_POOL_INSTRUCT_EXTENDED_WW_no_db_tool,
     REACT_POOL_INSTRUCT,
+    examples_tools,
+    examples_no_tools
 )
 from .summarization_prompts import (
     STEP_BY_STEP_SUMMARIZATION_PROMPT,
@@ -37,3 +39,14 @@ __all__ = [
     "STEP_BY_STEP_SUMMARIZATION_PROMPT",
     "STEPS_BATCH_SUMMARIZATION_PROMPT",
 ]
+
+from .output_schema_prompts.ae_bench import taxonomy as ae_taxonomy
+from  .output_schema_prompts.ae_bench import output_schema as ae_output_schema
+from .output_schema_prompts.pumpkin_bench import taxonomy as pumpkin_taxonomy
+from .output_schema_prompts.pumpkin_bench import output_schema as pumpkin_output_schema
+from .output_schema_prompts.trail_bench import taxonomy as trail_taxonomy
+from .output_schema_prompts.trail_bench import output_schema as trail_output_schema
+from .output_schema_prompts.aegis_bench import taxonomy as aegis_taxonomy
+from .output_schema_prompts.aegis_bench import output_schema as aegis_output_schema
+from .output_schema_prompts.ww_bench import taxonomy as ww_taxonomy
+from .output_schema_prompts.ww_bench import output_schema as ww_output_schema

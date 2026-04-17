@@ -4,7 +4,6 @@ import pandas as pd
 from pathlib import Path
 
 df = pd.read_parquet("hf://datasets/Kevin355/Who_and_When/Hand-Crafted.parquet")
-df = df[:30]
 # df = pd.read_parquet("hf://datasets/Kevin355/Who_and_When/Algorithm-Generated.parquet")
 
 path = str(
