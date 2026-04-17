@@ -107,7 +107,8 @@ class UsageTrackingMixin:
             return CostBreakdown(
                 input_price=float(price_data.input_price),
                 output_price=float(price_data.output_price),
-                total_price=float(price_data.input_price) + float(price_data.output_price),
+                total_price=float(price_data.input_price)
+                + float(price_data.output_price),
             )
 
         except Exception as e:

@@ -3,18 +3,21 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-import glob
 import asyncio
+import glob
 import os
+
 from dotenv import load_dotenv
 
 load_dotenv(".env")
 
-from autojudge.meta_agents import StepsBatchSummarizer
-from autojudge.utils import get_logger
 import json
+
 import pandas as pd
 from pydantic_ai.models.openai import OpenAIChatModel
+
+from autojudge.meta_agents import StepsBatchSummarizer
+from autojudge.utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -84,7 +87,7 @@ async def main(save_folder: str, df: pd.DataFrame, bench_name: str):
     if results_dir.exists():
         for res in os.listdir(results_dir):
             res_path = Path(results_dir) / res
-            done_traces.append(res_path.stem) 
+            done_traces.append(res_path.stem)
 
     # skip failed traces
     failed_traces_ids = []
@@ -129,7 +132,7 @@ async def main(save_folder: str, df: pd.DataFrame, bench_name: str):
                     summarizer_model,
                     chunk,
                     chunk_ids,
-                    str(df.iloc[idx]['filename']),
+                    str(df.iloc[idx]["filename"]),
                     prev_summary_text,
                     logger,
                 )
@@ -146,9 +149,7 @@ async def main(save_folder: str, df: pd.DataFrame, bench_name: str):
 
             logger.info("Trace summary generated")
             os.makedirs(
-                Path(__file__).resolve().parent
-                / "summaries_agent_error"
-                / bench_name,
+                Path(__file__).resolve().parent / "summaries_agent_error" / bench_name,
                 exist_ok=True,
             )
             with open(summary_file, "w") as f:
@@ -178,8 +179,6 @@ if __name__ == "__main__":
 
     asyncio.run(
         main(
-            save_folder="summaries_agent_error",
-            df=df[:],
-            bench_name=Path(folder).name
+            save_folder="summaries_agent_error", df=df[:], bench_name=Path(folder).name
         )
     )

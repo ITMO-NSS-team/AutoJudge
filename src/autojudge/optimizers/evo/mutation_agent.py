@@ -66,7 +66,9 @@ Parallel processing (4 agents):
     def _get_output_type(self):
         return GraphOperationResult
 
-    def _validate_graph(self, graph: GraphDict, available_agents: AgentPool) -> GraphDict:
+    def _validate_graph(
+        self, graph: GraphDict, available_agents: AgentPool
+    ) -> GraphDict:
         """Validate and filter graph to only include agents from available pool."""
         allowed = {agent.name for agent in available_agents} | {
             agent.id for agent in available_agents
@@ -82,12 +84,16 @@ Parallel processing (4 agents):
 
             invalid_children = [c for c in children if c not in allowed]
             if invalid_children:
-                logger.warning(f"Removed invalid children {invalid_children} from agent '{parent}'")
+                logger.warning(
+                    f"Removed invalid children {invalid_children} from agent '{parent}'"
+                )
 
             validated[parent] = [c for c in children if c in allowed]
 
         if not validated and graph:
-            logger.warning("Validation resulted in empty graph. Returning original graph.")
+            logger.warning(
+                "Validation resulted in empty graph. Returning original graph."
+            )
             return graph
 
         return validated if validated else graph

@@ -4,23 +4,23 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import asyncio
-
-from autojudge.meta_agents import PoolGenerator
-from autojudge.agent_pool import AgentPool
-from autojudge.pipeline.types import GraphDict
-from autojudge.pipeline import PipelineBuilder
-from autojudge.utils.langfuse_utils import ainvoke_with_lf
-from autojudge.utils import get_logger
-from maseval import get_langfuse_download_client, get_langfuse_judge_client
-from maseval.parsers.langfuse_parser_v3 import parse_langfuse_task
-from autojudge.meta_agents.prompts import examples_tools as examples
-from autojudge.meta_agents.prompts import pumpkin_output_schema, pumpkin_taxonomy
-from dotenv import load_dotenv
-from autojudge.meta_agents.graph_gen import get_parallel_graph
-
 import json
 import os
+
 import pandas as pd
+from dotenv import load_dotenv
+from maseval import get_langfuse_download_client, get_langfuse_judge_client
+from maseval.parsers.langfuse_parser_v3 import parse_langfuse_task
+
+from autojudge.agent_pool import AgentPool
+from autojudge.meta_agents import PoolGenerator
+from autojudge.meta_agents.graph_gen import get_parallel_graph
+from autojudge.meta_agents.prompts import examples_tools as examples
+from autojudge.meta_agents.prompts import pumpkin_output_schema, pumpkin_taxonomy
+from autojudge.pipeline import PipelineBuilder
+from autojudge.pipeline.types import GraphDict
+from autojudge.utils import get_logger
+from autojudge.utils.langfuse_utils import ainvoke_with_lf
 
 load_dotenv(".env")
 logger = get_logger(__name__)
@@ -36,7 +36,9 @@ async def main(
     logger.info(f"Starting autojudge evaluation for task name: {name}")
 
     pool_gen = PoolGenerator(
-        output_schema=pumpkin_output_schema, taxonomy=pumpkin_taxonomy, examples=examples
+        output_schema=pumpkin_output_schema,
+        taxonomy=pumpkin_taxonomy,
+        examples=examples,
     )
     lf = get_langfuse_download_client()
     judge_client = get_langfuse_judge_client()

@@ -15,9 +15,9 @@ from autojudge.pipeline.pipeline_builder import PipelineBuilder
 from autojudge.pipeline.types import GraphDict
 from autojudge.utils.logger import get_logger
 
+from ...utils.langfuse_utils import ainvoke_with_lf
 from .crossover_agent import CrossoverAgent
 from .mutation_agent import MutationAgent
-from ...utils.langfuse_utils import ainvoke_with_lf
 
 load_dotenv()
 
@@ -164,7 +164,9 @@ class LLMEvoOptimizer(MASOptimizer):
         tournament_size = 3
 
         for _ in range(num_parents):
-            indices = random.sample(range(len(population)), min(tournament_size, len(population)))
+            indices = random.sample(
+                range(len(population)), min(tournament_size, len(population))
+            )
             sub_scores = [scores[i] for i in indices]
             winner_idx = indices[sub_scores.index(max(sub_scores))]
             parents.append((copy.deepcopy(population[winner_idx]), scores[winner_idx]))
@@ -186,7 +188,9 @@ class LLMEvoOptimizer(MASOptimizer):
             pipeline = builder.build()
 
             # Execute pipeline
-            response, trace_id = await ainvoke_with_lf(agent_pool, pipeline, task_description, graph)
+            response, trace_id = await ainvoke_with_lf(
+                agent_pool, pipeline, task_description, graph
+            )
             logger.info(f"Pipeline response: {response}")
 
             # Track pipeline costs
@@ -201,7 +205,9 @@ class LLMEvoOptimizer(MASOptimizer):
             # Get trace from pipeline
             trace = pipeline.trace
             if trace is None:
-                logger.error(f"Pipeline execution did not produce a trace for graph: {graph}")
+                logger.error(
+                    f"Pipeline execution did not produce a trace for graph: {graph}"
+                )
                 return float("-inf"), None
 
             trace.session_id = trace_id
@@ -225,7 +231,8 @@ class LLMEvoOptimizer(MASOptimizer):
     ) -> Tuple[List[float], List[Optional[str]]]:
         """Evaluate all graphs in the current population asynchronously."""
         eval_tasks = [
-            self._evaluate_graph(graph, agent_pool, judge, task_description) for graph in population
+            self._evaluate_graph(graph, agent_pool, judge, task_description)
+            for graph in population
         ]
         results = await asyncio.gather(*eval_tasks)
         scores, responses = zip(*results)
@@ -267,7 +274,9 @@ class LLMEvoOptimizer(MASOptimizer):
         elitism: int,
     ) -> List[GraphDict]:
         """Select top individuals to carry forward."""
-        elite_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:elitism]
+        elite_indices = sorted(
+            range(len(scores)), key=lambda i: scores[i], reverse=True
+        )[:elitism]
         elites = [copy.deepcopy(population[i]) for i in elite_indices]
         logger.debug(f"Selected {len(elites)} elites for next generation")
         return elites
@@ -322,7 +331,9 @@ class LLMEvoOptimizer(MASOptimizer):
         scores, responses = await self._evaluate_population(
             population, agent_pool, judge, task_description
         )
-        gen_stats = self._compute_generation_stats(generation, population, scores, responses)
+        gen_stats = self._compute_generation_stats(
+            generation, population, scores, responses
+        )
 
         # Early stop if perfect score reached
         if gen_stats.best_score >= 1.0:
@@ -399,6 +410,8 @@ class LLMEvoOptimizer(MASOptimizer):
         logger.info("Evolution complete - Final costs:")
         logger.info(f"  Optimizer (Mutation + Crossover): ${self.cost.total_price:.6f}")
         logger.info(f"  Pipeline Evaluations: ${self._pipeline_total_cost:.6f}")
-        logger.info(f"  Grand Total: ${self.cost.total_price + self._pipeline_total_cost:.6f}")
+        logger.info(
+            f"  Grand Total: ${self.cost.total_price + self._pipeline_total_cost:.6f}"
+        )
 
         return best_generation.best_graph, best_generation.best_score, self.history

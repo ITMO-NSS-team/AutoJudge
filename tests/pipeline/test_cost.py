@@ -149,7 +149,9 @@ class TestPipelineCostIntegration:
     @pytest.mark.asyncio
     async def test_single_node_pipeline_cost(self):
         """Should calculate cost for single node pipeline execution"""
-        node = AgentNode(name="Summarizer", instructions="Summarize the input in one sentence")
+        node = AgentNode(
+            name="Summarizer", instructions="Summarize the input in one sentence"
+        )
         pipeline = Pipeline(execution_order=[node])
 
         await pipeline.ainvoke("Test query for cost calculation")

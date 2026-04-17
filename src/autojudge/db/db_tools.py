@@ -25,7 +25,8 @@ async def get_content_function(
         "REQUIRED: Database state_id (format: 'uuid_1', example: '5f982798-16b9-4051-ab57-cfc7ebdb2a91_1')",
     ],
     table_name: Annotated[
-        str, "REQUIRED: Table name (valid_options: 'our_mas', 'who_when', 'trail', 'agent_error')"
+        str,
+        "REQUIRED: Table name (valid_options: 'our_mas', 'who_when', 'trail', 'agent_error')",
     ],
 ) -> GetContentOutput:
     """
@@ -57,7 +58,7 @@ async def get_content_function(
     #     (VALID_TABLES - {table_name}).pop() if table_name in VALID_TABLES else None
     # )
     fallback_table = ["agent_error"]
-    table_name="agent_error"
+    table_name = "agent_error"
 
     try:
         conn = psycopg2.connect(
@@ -72,8 +73,8 @@ async def get_content_function(
         tables_to_try = [table_name]
         if fallback_table:
             tables_to_try.append(fallback_table)
-            print('Attention, use fallback: ', fallback_table[0])
-        print('Use table: ', table_name)
+            print("Attention, use fallback: ", fallback_table[0])
+        print("Use table: ", table_name)
 
         for tbl in tables_to_try:
             cur.execute(f"SELECT content FROM {tbl} WHERE state_id = %s", (state_id,))

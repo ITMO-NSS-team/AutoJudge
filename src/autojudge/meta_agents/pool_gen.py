@@ -8,7 +8,10 @@ from autojudge.pipeline.node import AgentNode
 from autojudge.utils import get_logger
 
 from .base import BaseMetaAgent
-from .prompts import DEFAULT_POOL_INSTRUCT_EXTENDED, DEFAULT_POOL_INSTRUCT_EXTENDED_no_db_tool
+from .prompts import (
+    DEFAULT_POOL_INSTRUCT_EXTENDED,
+    DEFAULT_POOL_INSTRUCT_EXTENDED_no_db_tool,
+)
 
 logger = get_logger()
 
@@ -28,7 +31,7 @@ class PoolGenerator(BaseMetaAgent):
         output_schema: str = "",
         taxonomy: str = "",
         examples: str = "",
-        use_summary: bool = False
+        use_summary: bool = False,
     ):
         print(
             f"Initializing PoolGenerator with model={model}, temperature={temperature}, summary: {use_summary}"
@@ -43,12 +46,12 @@ class PoolGenerator(BaseMetaAgent):
         )
 
     def _get_system_prompt(self) -> str:
-        if not(self.summary):
+        if not (self.summary):
             return DEFAULT_POOL_INSTRUCT_EXTENDED_no_db_tool.substitute(
-            taxonomy=self.taxonomy,
-            judge_output_format=self.schema,
-            examples=self.examples,
-        )
+                taxonomy=self.taxonomy,
+                judge_output_format=self.schema,
+                examples=self.examples,
+            )
         else:
             return DEFAULT_POOL_INSTRUCT_EXTENDED.substitute(
                 taxonomy=self.taxonomy,
@@ -76,7 +79,6 @@ class PoolGenerator(BaseMetaAgent):
             )
             for schema in agent_schemas
         ]
-
 
     async def create_pool(
         self, task_description: str, context: Optional[str] = None

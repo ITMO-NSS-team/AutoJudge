@@ -2,10 +2,7 @@
 
 from string import Template
 
-from .common import (
-    JSON_OBJECT_OUTPUT_FORMAT,
-    JSON_OBJECT_RESPONSE_FORMAT,
-)
+from .common import JSON_OBJECT_OUTPUT_FORMAT, JSON_OBJECT_RESPONSE_FORMAT
 
 DEFAULT_GRAPH_INSTRUCT = Template(
     Template(

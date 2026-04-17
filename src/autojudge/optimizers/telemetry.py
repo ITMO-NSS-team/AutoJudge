@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import random
 from collections.abc import Callable, Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import MappingProxyType
-from copy import deepcopy
 
 from autojudge.agent_pool import AgentPool
 from autojudge.pipeline.types import PipelineTrace
@@ -14,6 +14,7 @@ from autojudge.pipeline.types import PipelineTrace
 @dataclass(frozen=True, slots=True)
 class EvaluationTelemetry:
     """Persisted evaluation details for optimisation history."""
+
     quality: dict
     cost: float
     budget_spent: float
@@ -34,9 +35,13 @@ class EvaluationTelemetry:
             raise ValueError("Budget spent cannot be negative")
         object.__setattr__(self, "metrics", MappingProxyType(dict(self.metrics)))
         if self.pipeline_tokens is not None:
-            object.__setattr__(self, "pipeline_tokens", MappingProxyType(dict(self.pipeline_tokens)))
+            object.__setattr__(
+                self, "pipeline_tokens", MappingProxyType(dict(self.pipeline_tokens))
+            )
         if self.pipeline_cost is not None:
-            object.__setattr__(self, "pipeline_cost", MappingProxyType(dict(self.pipeline_cost)))
+            object.__setattr__(
+                self, "pipeline_cost", MappingProxyType(dict(self.pipeline_cost))
+            )
 
 
 def clone_pool(pool: AgentPool) -> AgentPool:
@@ -47,6 +52,7 @@ def clone_pool(pool: AgentPool) -> AgentPool:
 @dataclass(frozen=True, slots=True)
 class PoolCandidate:
     """Candidate agent pool subject to evaluation."""
+
     pool: AgentPool
 
     def clone(self) -> PoolCandidate:
@@ -56,6 +62,7 @@ class PoolCandidate:
 @dataclass(frozen=True, slots=True)
 class PoolEvaluationRecord:
     """Association between a pool candidate and telemetry."""
+
     candidate: PoolCandidate
     telemetry: EvaluationTelemetry
 
@@ -63,17 +70,26 @@ class PoolEvaluationRecord:
 @dataclass(frozen=True, slots=True)
 class AgentPoolNeighbour:
     """Perturbation operator used during VNS shaking."""
+
     name: str
     transform: Callable[[AgentPool, int, random.Random], AgentPool]
 
-    def apply(self, pool: AgentPool, amplitude: int, rng: random.Random) -> PoolCandidate:
+    def apply(
+        self, pool: AgentPool, amplitude: int, rng: random.Random
+    ) -> PoolCandidate:
         mutated = self.transform(clone_pool(pool), amplitude, rng)
         return PoolCandidate(mutated)
 
 
 class AgentPoolNeighborhood:
     """Collection of neighbourhood operators for AgentPool perturbations."""
-    def __init__(self, operators: Sequence[AgentPoolNeighbour], *, rng: random.Random | None = None) -> None:
+
+    def __init__(
+        self,
+        operators: Sequence[AgentPoolNeighbour],
+        *,
+        rng: random.Random | None = None,
+    ) -> None:
         if not operators:
             raise ValueError("At least one neighbourhood operator is required")
         self._operators = tuple(operators)
@@ -82,5 +98,6 @@ class AgentPoolNeighborhood:
     def neighbours(self, pool: AgentPool, amplitude: int) -> tuple[PoolCandidate, ...]:
         if amplitude <= 0:
             raise ValueError("Amplitude must be positive")
-        return tuple(operator.apply(pool, amplitude, self._rng) for operator in self._operators)
-
+        return tuple(
+            operator.apply(pool, amplitude, self._rng) for operator in self._operators
+        )

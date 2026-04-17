@@ -3,26 +3,27 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-import pandas as pd
+import asyncio
 import json
+import os
 from pathlib import Path
 
-import asyncio
-import os
+import pandas as pd
 from dotenv import load_dotenv
 
 load_dotenv(".env")
 
-from autojudge.meta_agents import PoolGenerator
-from autojudge.agent_pool import AgentPool
-from autojudge.pipeline.types import GraphDict
-from autojudge.pipeline import PipelineBuilder
-from autojudge.utils.langfuse_utils import ainvoke_with_lf
-from autojudge.utils import get_logger
 from maseval import get_langfuse_judge_client
+
+from autojudge.agent_pool import AgentPool
+from autojudge.meta_agents import PoolGenerator
+from autojudge.meta_agents.graph_gen import get_parallel_graph
 from autojudge.meta_agents.prompts import examples_tools as examples
 from autojudge.meta_agents.prompts import trail_output_schema, trail_taxonomy
-from autojudge.meta_agents.graph_gen import get_parallel_graph
+from autojudge.pipeline import PipelineBuilder
+from autojudge.pipeline.types import GraphDict
+from autojudge.utils import get_logger
+from autojudge.utils.langfuse_utils import ainvoke_with_lf
 
 logger = get_logger(__name__)
 
@@ -73,13 +74,6 @@ async def main(save_folder: str, df):
         serializable_results = {}
 
         try:
-            # trace_data = {
-            #     "history": df.iloc[idx]["spans"],
-            #     "question": "You should evaluate the trace.",
-            #     "task_id": df.iloc[idx]["trace_id"],
-            #     "trace_id": df.iloc[idx]["trace_id"],
-            # }
-            # q = trace_data["question"][:100]
             trace_data = {
                 "history": df.iloc[idx]["history"],
                 "question": "You should evaluate the trace.",

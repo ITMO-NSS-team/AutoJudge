@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+
 def evaluate_metrics(folder_path: str):
     folder = Path(folder_path)
     if not folder.exists():
@@ -22,16 +23,16 @@ def evaluate_metrics(folder_path: str):
 
         scores = data.get("summarizer_score", {}).get("scores", [])[0].get("score", {})
         anno = data.get("summarizer_score", {}).get("scores", [])[0]
-        
+
         gt_step = anno.get("critical_failure_step")
         gt_module = anno.get("critical_failure_module")
         gt_type = anno.get("step_annotations")[0].get(gt_module).get("failure_type")
-        
+
         if gt_module == "" or gt_step == "":
             lost_gt += 1
             print(f"Skip sample, lost GT!, lost count: {lost_gt}")
             continue
-    
+
         pred_step = scores.get("critical_failure_step")
         pred_module = scores.get("critical_failure_module")
         pred_type = scores.get("failure_type")
@@ -41,18 +42,19 @@ def evaluate_metrics(folder_path: str):
             step_correct += 1
         if str(pred_step) == str(gt_step) and str(pred_module) == str(gt_module):
             step_module_correct += 1
-            
-        # if GT not exist in annotation 
+
+        # if GT not exist in annotation
         if gt_type != "":
-            if (str(pred_step) == str(gt_step)
+            if (
+                str(pred_step) == str(gt_step)
                 and str(pred_module) == str(gt_module)
-                and str(pred_type) == str(gt_type)):
+                and str(pred_type) == str(gt_type)
+            ):
                 all_correct += 1
         else:
-            if (str(pred_step) == str(gt_step)
-                and str(pred_module) == str(gt_module)):
+            if str(pred_step) == str(gt_step) and str(pred_module) == str(gt_module):
                 all_correct += 1
-            
+
     total_traces = total_traces - lost_gt
 
     print(f"Total traces: {total_traces}")

@@ -75,7 +75,9 @@ class autojudge:
                 "Please install the maseval dependency group: uv sync --group maseval"
             )
 
-        logger.info(f"Starting arun_with_judge: max_iter={max_iter}, query_length={len(query)}")
+        logger.info(
+            f"Starting arun_with_judge: max_iter={max_iter}, query_length={len(query)}"
+        )
 
         judge = MasevalJudge()  # type: ignore
         full_query = query
@@ -99,7 +101,9 @@ class autojudge:
             logger.info(f"Pool created with {len(pool.full_agents_data)} agents")
 
             logger.info("Generating execution graph")
-            graph_dict = await self.graph_gen.create_graph(pool, full_query, context=context)
+            graph_dict = await self.graph_gen.create_graph(
+                pool, full_query, context=context
+            )
             logger.info(f"Graph generated:\n{graph_dict}")
 
             builder = PipelineBuilder()
@@ -108,7 +112,9 @@ class autojudge:
             logger.info(f"Pipeline graph:\n{mmd_graph}")
 
             logger.info("Executing pipeline...")
-            result, trace_id = await ainvoke_with_lf(pool, self._pipeline, full_query, graph_dict)
+            result, trace_id = await ainvoke_with_lf(
+                pool, self._pipeline, full_query, graph_dict
+            )
 
             if not trace_id:
                 raise ValueError("Trace ID is None")
@@ -140,7 +146,9 @@ class autojudge:
                     "iterations": iteration + 1,
                 }
 
-            experience.append(f"Iteration {iteration + 1} feedback:\n{judge_result.justification}")
+            experience.append(
+                f"Iteration {iteration + 1} feedback:\n{judge_result.justification}"
+            )
 
         logger.warning(
             f"Maximum iterations ({max_iter}) reached without finding optimal solution. "

@@ -1,3 +1,4 @@
+import os
 from typing import TYPE_CHECKING, Optional
 
 from autojudge.pipeline.pipeline_builder import PipelineBuilder
@@ -6,12 +7,12 @@ from autojudge.utils.logger import get_logger
 
 from .base import BaseMetaAgent
 from .prompts import DEFAULT_GRAPH_INSTRUCT
-import os
 
 if TYPE_CHECKING:
     from autojudge.agent_pool import AgentPool
 
 logger = get_logger()
+
 
 def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
     graph_dict: GraphDict = {}

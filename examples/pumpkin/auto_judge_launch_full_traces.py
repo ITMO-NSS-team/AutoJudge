@@ -4,22 +4,22 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import asyncio
-
-from autojudge.meta_agents import PoolGenerator
-from autojudge.agent_pool import AgentPool
-from autojudge.pipeline.types import GraphDict
-from autojudge.pipeline import PipelineBuilder
-from autojudge.pipeline.node_session import NodeExecution, NodeSessionError
-from autojudge.utils import get_logger
-from maseval import get_langfuse_download_client, get_langfuse_judge_client
-from maseval.parsers.langfuse_parser_v3 import parse_langfuse_task
-from autojudge.meta_agents.prompts import examples_no_tools as examples
-from autojudge.meta_agents.prompts import pumpkin_output_schema, pumpkin_taxonomy
-from dotenv import load_dotenv
-from autojudge.meta_agents.graph_gen import get_parallel_graph
-
 import json
 import os
+
+from dotenv import load_dotenv
+from maseval import get_langfuse_download_client, get_langfuse_judge_client
+from maseval.parsers.langfuse_parser_v3 import parse_langfuse_task
+
+from autojudge.agent_pool import AgentPool
+from autojudge.meta_agents import PoolGenerator
+from autojudge.meta_agents.graph_gen import get_parallel_graph
+from autojudge.meta_agents.prompts import examples_no_tools as examples
+from autojudge.meta_agents.prompts import pumpkin_output_schema, pumpkin_taxonomy
+from autojudge.pipeline import PipelineBuilder
+from autojudge.pipeline.node_session import NodeExecution, NodeSessionError
+from autojudge.pipeline.types import GraphDict
+from autojudge.utils import get_logger
 
 load_dotenv(".env")
 logger = get_logger(__name__)
@@ -63,16 +63,22 @@ def is_transient_chat_completion_error(exc: Exception) -> bool:
 
 
 def has_final_aggregator(pool: AgentPool) -> bool:
-    return any(agent.get("name") == "FINAL_AGGREGATOR" for agent in pool.full_agents_data)
+    return any(
+        agent.get("name") == "FINAL_AGGREGATOR" for agent in pool.full_agents_data
+    )
 
 
-async def create_pool_with_retries(pool_gen: PoolGenerator, judge_input: dict) -> AgentPool:
+async def create_pool_with_retries(
+    pool_gen: PoolGenerator, judge_input: dict
+) -> AgentPool:
     context_feedback = None
     attempt_errors: list[str] = []
 
     for attempt in range(1, POOL_GENERATION_ATTEMPTS + 1):
         try:
-            logger.info("Pool generation attempt %s/%s", attempt, POOL_GENERATION_ATTEMPTS)
+            logger.info(
+                "Pool generation attempt %s/%s", attempt, POOL_GENERATION_ATTEMPTS
+            )
             pool = await pool_gen.create_pool(judge_input, context=context_feedback)
 
             if has_final_aggregator(pool):
@@ -99,8 +105,7 @@ async def create_pool_with_retries(pool_gen: PoolGenerator, judge_input: dict) -
 
     error_block = "\n".join(f"- {err}" for err in attempt_errors)
     raise RuntimeError(
-        "Pool generation failed after retries. Attempts:\n"
-        f"{error_block}"
+        "Pool generation failed after retries. Attempts:\n" f"{error_block}"
     )
 
 
@@ -154,7 +159,8 @@ async def recover_missing_dependencies_for_final(
 
     for round_index in range(1, max_rounds + 1):
         missing_parents = [
-            parent for parent in final_node.parents
+            parent
+            for parent in final_node.parents
             if parent.id not in pipeline.node_session.node_executions
         ]
 
@@ -197,7 +203,8 @@ async def recover_missing_dependencies_for_final(
             break
 
     unresolved = [
-        parent.name for parent in final_node.parents
+        parent.name
+        for parent in final_node.parents
         if parent.id not in pipeline.node_session.node_executions
     ]
     if unresolved:
@@ -287,7 +294,9 @@ async def main(
     logger.info(f"Starting autojudge evaluation for task name: {name}")
 
     pool_gen = PoolGenerator(
-        output_schema=pumpkin_output_schema, taxonomy=pumpkin_taxonomy, examples=examples
+        output_schema=pumpkin_output_schema,
+        taxonomy=pumpkin_taxonomy,
+        examples=examples,
     )
     lf = get_langfuse_download_client()
     judge_client = get_langfuse_judge_client()
@@ -420,7 +429,7 @@ async def main(
                 metadata=trace_metadata,
             ) as span:
                 judge_client.update_current_trace(
-                    tags = [
+                    tags=[
                         "big_mas",
                         "full",
                         "gaia_without_summary",
@@ -549,7 +558,7 @@ async def main(
 if __name__ == "__main__":
     asyncio.run(
         main(
-            name="gaia_task_db0c3ed0-a4af-4442-bb6f-884d6da055cb", # big mas
+            name="gaia_task_db0c3ed0-a4af-4442-bb6f-884d6da055cb",  # big mas
             # name="gaia_task_07aac7b1-ffc3-4787-8e4c-7fb522156097",  # small mas
             save_folder="big_mas_no_sum",
             num_traces=165,

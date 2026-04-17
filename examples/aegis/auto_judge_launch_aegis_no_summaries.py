@@ -11,20 +11,24 @@ from dotenv import load_dotenv
 
 load_dotenv(".env")
 
-from autojudge.meta_agents import PoolGenerator
-from autojudge.meta_agents.prompts import DEFAULT_POOL_INSTRUCT_EXTENDED_no_db_tool
+from datasets import load_dataset
+from maseval import get_langfuse_judge_client
+
 from autojudge.agent_pool import AgentPool
-from autojudge.pipeline.types import GraphDict
+from autojudge.db.db_tools import get_content_tool
+from autojudge.meta_agents import PoolGenerator
+from autojudge.meta_agents.graph_gen import get_parallel_graph
+from autojudge.meta_agents.prompts import (
+    DEFAULT_POOL_INSTRUCT_EXTENDED_no_db_tool,
+    aegis_output_schema,
+    aegis_taxonomy,
+)
+from autojudge.meta_agents.prompts import examples_no_tools as examples
 from autojudge.pipeline import PipelineBuilder
 from autojudge.pipeline.node_session import NodeExecution, NodeSessionError
+from autojudge.pipeline.types import GraphDict
 from autojudge.utils import get_logger
 from autojudge.utils.langfuse_utils import setup_langfuse_instrumentation
-from maseval import get_langfuse_judge_client
-from autojudge.db.db_tools import get_content_tool
-from autojudge.meta_agents.prompts import examples_no_tools as examples
-from autojudge.meta_agents.prompts import aegis_output_schema, aegis_taxonomy
-from datasets import load_dataset
-from autojudge.meta_agents.graph_gen import get_parallel_graph
 
 logger = get_logger(__name__)
 
@@ -45,16 +49,22 @@ def is_transient_chat_completion_error(exc: Exception) -> bool:
 
 
 def has_final_aggregator(pool: AgentPool) -> bool:
-    return any(agent.get("name") == "FINAL_AGGREGATOR" for agent in pool.full_agents_data)
+    return any(
+        agent.get("name") == "FINAL_AGGREGATOR" for agent in pool.full_agents_data
+    )
 
 
-async def create_pool_with_retries(pool_gen: PoolGenerator, judge_input: dict) -> AgentPool:
+async def create_pool_with_retries(
+    pool_gen: PoolGenerator, judge_input: dict
+) -> AgentPool:
     context_feedback = None
     attempt_errors: list[str] = []
 
     for attempt in range(1, POOL_GENERATION_ATTEMPTS + 1):
         try:
-            logger.info("Pool generation attempt %s/%s", attempt, POOL_GENERATION_ATTEMPTS)
+            logger.info(
+                "Pool generation attempt %s/%s", attempt, POOL_GENERATION_ATTEMPTS
+            )
             pool = await pool_gen.create_pool(judge_input, context=context_feedback)
 
             if has_final_aggregator(pool):
@@ -81,8 +91,7 @@ async def create_pool_with_retries(pool_gen: PoolGenerator, judge_input: dict) -
 
     error_block = "\n".join(f"- {err}" for err in attempt_errors)
     raise RuntimeError(
-        "Pool generation failed after retries. Attempts:\n"
-        f"{error_block}"
+        "Pool generation failed after retries. Attempts:\n" f"{error_block}"
     )
 
 
@@ -136,7 +145,8 @@ async def recover_missing_dependencies_for_final(
 
     for round_index in range(1, max_rounds + 1):
         missing_parents = [
-            parent for parent in final_node.parents
+            parent
+            for parent in final_node.parents
             if parent.id not in pipeline.node_session.node_executions
         ]
 
@@ -179,7 +189,8 @@ async def recover_missing_dependencies_for_final(
             break
 
     unresolved = [
-        parent.name for parent in final_node.parents
+        parent.name
+        for parent in final_node.parents
         if parent.id not in pipeline.node_session.node_executions
     ]
     if unresolved:
@@ -294,7 +305,11 @@ async def main(save_folder: str, split: str = "test", max_traces: int | None = N
                             else:
                                 # Backward compatibility with legacy results saved as <trace_id>.json.
                                 # These correspond to the first occurrence (occurrence 0).
-                                base_id = data.get("task_id") or data.get("summary_file_used") or res_cropped
+                                base_id = (
+                                    data.get("task_id")
+                                    or data.get("summary_file_used")
+                                    or res_cropped
+                                )
                                 done_traces_with_occurrence.add((str(base_id), 0))
                 except Exception:
                     pass
@@ -302,7 +317,7 @@ async def main(save_folder: str, split: str = "test", max_traces: int | None = N
     failed_traces = []
     failed_file = local_results_dir / "failed_traces.txt"
     failed_traces_ids = []
-    
+
     if failed_file.exists():
         with open(failed_file) as fh:
             for line in fh:
@@ -311,21 +326,23 @@ async def main(save_folder: str, split: str = "test", max_traces: int | None = N
 
     # Track occurrence count per unique trace_id
     occurrence_counter = {}
-    
+
     for idx, trace in enumerate(ds):
         trace_id = str(trace["id"]).replace("/", "_")  # Ensure valid filename
-        
+
         # Count this occurrence of the trace_id
         if trace_id not in occurrence_counter:
             occurrence_counter[trace_id] = 0
         else:
             occurrence_counter[trace_id] += 1
-        
+
         occurrence = occurrence_counter[trace_id]
-        
+
         # Check if this specific occurrence was already processed
         if (trace_id, occurrence) in done_traces_with_occurrence:
-            logger.info(f"Task {trace_id} occurrence {occurrence} already processed, skipping...")
+            logger.info(
+                f"Task {trace_id} occurrence {occurrence} already processed, skipping..."
+            )
             continue
         if trace_id in failed_traces_ids:
             logger.info(f"Task {trace_id} previously failed, skipping...")
@@ -338,13 +355,17 @@ async def main(save_folder: str, split: str = "test", max_traces: int | None = N
         trace_input = trace.get("input", {})
         conversation_history = trace_input.get("conversation_history", [])
         if not conversation_history:
-            logger.warning(f"No conversation_history found for {trace_id}, skipping trace")
+            logger.warning(
+                f"No conversation_history found for {trace_id}, skipping trace"
+            )
             continue
 
         history_for_evaluating = json.dumps(conversation_history, indent=2)
         input_type = "raw_trace"
 
-        logger.info(f"Processing task {idx + 1}/{len(ds)}: {trace_id} (using {input_type})")
+        logger.info(
+            f"Processing task {idx + 1}/{len(ds)}: {trace_id} (using {input_type})"
+        )
 
         judge_input_dict = {
             "query": question,
@@ -354,7 +375,10 @@ async def main(save_folder: str, split: str = "test", max_traces: int | None = N
         judge_input = str(judge_input_dict)
 
         try:
-            pool = await create_pool_with_retries(pool_gen, dict(query=question, history_for_evaluating=history_for_evaluating))
+            pool = await create_pool_with_retries(
+                pool_gen,
+                dict(query=question, history_for_evaluating=history_for_evaluating),
+            )
             for agent in pool.full_agents_data:
                 agent["mcp_tools"] = [get_content_tool]
 
@@ -362,16 +386,21 @@ async def main(save_folder: str, split: str = "test", max_traces: int | None = N
             builder = PipelineBuilder()
             pipeline = builder.create_from_pool(pool, graph).build()
             pipeline.node_session.context_deps = trace_id
-            
+
             with judge_client.start_as_current_span(
                 name=f"evaluate_task_{trace_id}",
                 input={"task_id": trace_id, "input_type": input_type},
-                metadata={
-                    "task_id": trace_id,
-                    "input_type": input_type
-                },
+                metadata={"task_id": trace_id, "input_type": input_type},
             ) as span:
-                judge_client.update_current_trace(tags=["aegis" ,"test" if max_traces else "full", f"task_id:{trace_id}", split, "raw_trace"])
+                judge_client.update_current_trace(
+                    tags=[
+                        "aegis",
+                        "test" if max_traces else "full",
+                        f"task_id:{trace_id}",
+                        split,
+                        "raw_trace",
+                    ]
+                )
 
                 try:
                     raw_result = await pipeline.ainvoke(judge_input)
@@ -424,7 +453,9 @@ async def main(save_folder: str, split: str = "test", max_traces: int | None = N
                 "input_type": input_type,
                 "dataset_split": split,
                 "ground_truth": {
-                    "faulty_agents": trace.get("ground_truth", {}).get("injected_agents", []),
+                    "faulty_agents": trace.get("ground_truth", {}).get(
+                        "injected_agents", []
+                    ),
                 },
                 "model_detection": {
                     "faulty_agents": result_dict.get("faulty_agents", []),
@@ -436,7 +467,9 @@ async def main(save_folder: str, split: str = "test", max_traces: int | None = N
 
         except Exception as e:
             error_msg = str(e)
-            logger.error(f"Error processing task {trace_id}: {error_msg}", exc_info=True)
+            logger.error(
+                f"Error processing task {trace_id}: {error_msg}", exc_info=True
+            )
             failed_traces.append({"task_id": trace_id, "error": error_msg})
 
     if failed_traces:
@@ -453,7 +486,9 @@ async def main(save_folder: str, split: str = "test", max_traces: int | None = N
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="AEGIS Evaluation over Raw Traces (No Summaries, No Tools).")
+    parser = argparse.ArgumentParser(
+        description="AEGIS Evaluation over Raw Traces (No Summaries, No Tools)."
+    )
     parser.add_argument(
         "--split",
         default="test",
@@ -468,7 +503,7 @@ if __name__ == "__main__":
 
     # folder for output
     folder = "aegis_eval_summaries_test" if args.test else "aegis_eval_summaries_fixed"
-    
+
     max_traces = 5 if args.test else None
 
     asyncio.run(

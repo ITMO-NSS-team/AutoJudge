@@ -1,16 +1,16 @@
-from abc import ABC, abstractmethod
 import asyncio
+from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+from pydantic import BaseModel
 
 from autojudge.agent_pool import AgentPool
 from autojudge.meta_agents.base import BaseMetaAgent
 from autojudge.pipeline.node import AgentNode
 from autojudge.pipeline.pipeline import Pipeline
 from autojudge.utils.logger import get_logger, save_json
-
-from pydantic import BaseModel
 
 logger = get_logger()
 
@@ -124,8 +124,7 @@ async def optimize_pipeline_prompts(
     logger.info("Starting agent prompts optimization")
 
     tasks = [
-        optimizer.aoptimize(node, general_task)
-        for node in pipeline.execution_order
+        optimizer.aoptimize(node, general_task) for node in pipeline.execution_order
     ]
     optimized_prompts = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -141,9 +140,7 @@ async def optimize_pipeline_prompts(
             optimized = original
         else:
             optimized = opt_result
-            logger.debug(
-                f"Agent '{node.name}' original instructions: {original[:200]}"
-            )
+            logger.debug(f"Agent '{node.name}' original instructions: {original[:200]}")
             logger.debug(
                 f"Agent '{node.name}' optimized instructions: {optimized[:200]}"
             )
@@ -152,9 +149,7 @@ async def optimize_pipeline_prompts(
             "success": not isinstance(opt_result, Exception),
             "original": original,
             "optimized": optimized,
-            "error": (
-                str(opt_result) if isinstance(opt_result, Exception) else None
-            ),
+            "error": (str(opt_result) if isinstance(opt_result, Exception) else None),
         }
 
         node.instructions = optimized

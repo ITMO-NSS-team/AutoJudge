@@ -19,26 +19,29 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import argparse
 import asyncio
-import os
 import json
+import os
+
 import pandas as pd
 from dotenv import load_dotenv
 
 load_dotenv(".env")
 
-from autojudge.meta_agents import PoolGenerator
-from autojudge.pipeline import PipelineBuilder
-from autojudge.agent_pool import AgentPool
-from autojudge.pipeline.types import GraphDict
-from autojudge.utils.langfuse_utils import ainvoke_with_lf
-from autojudge.utils import get_logger
 from maseval import get_langfuse_judge_client
 from pydantic_ai.messages import ModelMessagesTypeAdapter
+
+from autojudge.agent_pool import AgentPool
+from autojudge.meta_agents import PoolGenerator
+from autojudge.meta_agents.graph_gen import get_parallel_graph
 from autojudge.meta_agents.prompts import examples_no_tools as examples
 from autojudge.meta_agents.prompts import ww_output_schema, ww_taxonomy
-from autojudge.meta_agents.graph_gen import get_parallel_graph
+from autojudge.pipeline import PipelineBuilder
+from autojudge.pipeline.types import GraphDict
+from autojudge.utils import get_logger
+from autojudge.utils.langfuse_utils import ainvoke_with_lf
 
 logger = get_logger(__name__)
+
 
 def _serialize_pipeline_trace(pipeline) -> list:
     """Serialize per-node message histories from a completed pipeline."""
@@ -51,13 +54,21 @@ def _serialize_pipeline_trace(pipeline) -> list:
                 node_trace.message_history, mode="json"
             )
         except Exception as e:
-            messages = [{"_serialization_error": str(e), "_repr": repr(node_trace.message_history)}]
-        result.append({
-            "node_name": node_trace.node_name,
-            "model": node_trace.model,
-            "messages": messages,
-        })
+            messages = [
+                {
+                    "_serialization_error": str(e),
+                    "_repr": repr(node_trace.message_history),
+                }
+            ]
+        result.append(
+            {
+                "node_name": node_trace.node_name,
+                "model": node_trace.model,
+                "messages": messages,
+            }
+        )
     return result
+
 
 def _strip_fences(text: str) -> str:
     t = text.strip()
@@ -66,8 +77,13 @@ def _strip_fences(text: str) -> str:
         t = "\n".join(lines[1:-1]).strip()
     return t
 
-async def main(save_folder: str, df, df_summary=None, split: str = "algo", test_mode: bool = False):
-    logger.info("===Starting Who&When evaluation (single-step sequential with early stopping)===")
+
+async def main(
+    save_folder: str, df, df_summary=None, split: str = "algo", test_mode: bool = False
+):
+    logger.info(
+        "===Starting Who&When evaluation (single-step sequential with early stopping)==="
+    )
 
     pool_gen = PoolGenerator(
         output_schema=ww_output_schema, taxonomy=ww_taxonomy, examples=examples
@@ -78,10 +94,16 @@ async def main(save_folder: str, df, df_summary=None, split: str = "algo", test_
 
     done_traces: list[str] = []
     if local_results_dir.exists():
-        done_traces = [f.split(".")[0] for f in os.listdir(local_results_dir) if f.endswith(".json")]
+        done_traces = [
+            f.split(".")[0]
+            for f in os.listdir(local_results_dir)
+            if f.endswith(".json")
+        ]
 
     failed_traces_ids: list[str] = []
-    if local_results_dir.exists() and "failed_traces.txt" in os.listdir(local_results_dir):
+    if local_results_dir.exists() and "failed_traces.txt" in os.listdir(
+        local_results_dir
+    ):
         with open(local_results_dir / "failed_traces.txt") as fh:
             for line in fh:
                 if line.startswith("Task ID:"):
@@ -104,9 +126,13 @@ async def main(save_folder: str, df, df_summary=None, split: str = "algo", test_
 
         try:
             # Use raw history directly. Summarized-step variant is commented out above.
-            history_for_judges = [json.dumps(s, ensure_ascii=False) for s in row["history"]]
+            history_for_judges = [
+                json.dumps(s, ensure_ascii=False) for s in row["history"]
+            ]
             input_type = "raw"
-            logger.info(f"[INPUT] {len(history_for_judges)} raw steps for task {task_id}")
+            logger.info(
+                f"[INPUT] {len(history_for_judges)} raw steps for task {task_id}"
+            )
 
             query = json.dumps(row["question"], ensure_ascii=False)
 
@@ -120,16 +146,23 @@ async def main(save_folder: str, df, df_summary=None, split: str = "algo", test_
             sample_input = {
                 "query": query,
                 "step_index": 1,
-                "step_to_evaluate": json.loads(history_for_judges[0]) if history_for_judges else {},
+                "step_to_evaluate": (
+                    json.loads(history_for_judges[0]) if history_for_judges else {}
+                ),
             }
 
             pool = None
             for attempt in range(3):
                 try:
                     pool = await pool_gen.create_pool(sample_input)
-                    if any(a.get("name") == "FINAL_AGGREGATOR" for a in pool.full_agents_data):
+                    if any(
+                        a.get("name") == "FINAL_AGGREGATOR"
+                        for a in pool.full_agents_data
+                    ):
                         break
-                    logger.warning(f"Attempt {attempt + 1}: FINAL_AGGREGATOR missing, retrying...")
+                    logger.warning(
+                        f"Attempt {attempt + 1}: FINAL_AGGREGATOR missing, retrying..."
+                    )
                     pool = None
                 except Exception as e:
                     if attempt == 2:
@@ -137,7 +170,9 @@ async def main(save_folder: str, df, df_summary=None, split: str = "algo", test_
                     logger.warning(f"Pool gen attempt {attempt + 1} failed: {e}")
 
             if pool is None:
-                raise RuntimeError("Could not create a valid pool with FINAL_AGGREGATOR after 3 attempts")
+                raise RuntimeError(
+                    "Could not create a valid pool with FINAL_AGGREGATOR after 3 attempts"
+                )
 
             logger.info(f"Pool ready: {len(pool)} judges")
 
@@ -158,7 +193,6 @@ async def main(save_folder: str, df, df_summary=None, split: str = "algo", test_
                 f"folder:{save_folder}",
             ]
 
-
             with judge_client.start_as_current_span(
                 name=f"evaluate_task_{task_id}",
                 input={"task_id": task_id, "n_steps": len(history_for_judges)},
@@ -172,7 +206,9 @@ async def main(save_folder: str, df, df_summary=None, split: str = "algo", test_
                 last_pipeline = None
 
                 for step_index, step_str in enumerate(history_for_judges, start=1):
-                    logger.info(f"  Evaluating step {step_index}/{len(history_for_judges)}...")
+                    logger.info(
+                        f"  Evaluating step {step_index}/{len(history_for_judges)}..."
+                    )
 
                     step_input = {
                         "query": query,
@@ -184,7 +220,9 @@ async def main(save_folder: str, df, df_summary=None, split: str = "algo", test_
                     current_pipeline = None
                     for attempt in range(1, 4):
                         pipeline = builder.create_from_pool(pool, graph).build()
-                        raw, _tid = await ainvoke_with_lf(pool, pipeline, step_input, graph)
+                        raw, _tid = await ainvoke_with_lf(
+                            pool, pipeline, step_input, graph
+                        )
                         if raw and raw.strip():
                             raw_result = raw
                             current_pipeline = pipeline
@@ -194,8 +232,12 @@ async def main(save_folder: str, df, df_summary=None, split: str = "algo", test_
                         )
 
                     if raw_result is None:
-                        logger.warning(f"  Step {step_index}: pipeline returned empty result, recording error.")
-                        step_results.append({"step": step_index, "error": "pipeline_empty"})
+                        logger.warning(
+                            f"  Step {step_index}: pipeline returned empty result, recording error."
+                        )
+                        step_results.append(
+                            {"step": step_index, "error": "pipeline_empty"}
+                        )
                         continue
 
                     last_pipeline = current_pipeline
@@ -208,7 +250,11 @@ async def main(save_folder: str, df, df_summary=None, split: str = "algo", test_
                         )
                         result_dict = {"raw": clean}
 
-                    verdict = result_dict.get("verdict", "").lower() if isinstance(result_dict, dict) else ""
+                    verdict = (
+                        result_dict.get("verdict", "").lower()
+                        if isinstance(result_dict, dict)
+                        else ""
+                    )
                     step_results.append({"step": step_index, "result": result_dict})
                     logger.info(
                         f"  Step {step_index} → verdict={verdict!r}  agent={result_dict.get('agent', '?')}"
@@ -217,7 +263,9 @@ async def main(save_folder: str, df, df_summary=None, split: str = "algo", test_
                     if verdict == "poor":
                         guilty_result = result_dict
                         guilty_step = step_index
-                        logger.info(f"  [EARLY STOP] Mistake found at step {step_index}.")
+                        logger.info(
+                            f"  [EARLY STOP] Mistake found at step {step_index}."
+                        )
                         break
 
                 span.update(
@@ -233,7 +281,8 @@ async def main(save_folder: str, df, df_summary=None, split: str = "algo", test_
                 final_score = {
                     "agent": guilty_result.get("agent", ""),
                     "step": guilty_step,
-                    "reason": guilty_result.get("reason") or guilty_result.get("justification", ""),
+                    "reason": guilty_result.get("reason")
+                    or guilty_result.get("justification", ""),
                 }
             else:
                 final_score = {
@@ -245,7 +294,9 @@ async def main(save_folder: str, df, df_summary=None, split: str = "algo", test_
             # Coerce step to int just in case
             if isinstance(final_score.get("step"), str):
                 try:
-                    final_score["step"] = int(str(final_score["step"]).strip().strip(","))
+                    final_score["step"] = int(
+                        str(final_score["step"]).strip().strip(",")
+                    )
                 except (ValueError, TypeError):
                     pass
 
@@ -288,17 +339,28 @@ async def main(save_folder: str, df, df_summary=None, split: str = "algo", test_
         except Exception as e:
             error_msg = str(e)
             safe_error = error_msg.replace("{", "{{").replace("}", "}}")
-            logger.error(f"Error processing task {task_id}: {safe_error}", exc_info=True)
-            failed_traces.append(
-                {"task_id": task_id, "task_index": idx + 1, "error": error_msg, "error_type": type(e).__name__}
+            logger.error(
+                f"Error processing task {task_id}: {safe_error}", exc_info=True
             )
-            print(f"\n!  Failed task {idx + 1}/{len(df)}: {task_id}\n   Error: {error_msg}\n")
+            failed_traces.append(
+                {
+                    "task_id": task_id,
+                    "task_index": idx + 1,
+                    "error": error_msg,
+                    "error_type": type(e).__name__,
+                }
+            )
+            print(
+                f"\n!  Failed task {idx + 1}/{len(df)}: {task_id}\n   Error: {error_msg}\n"
+            )
 
     if failed_traces:
         local_results_dir.mkdir(parents=True, exist_ok=True)
         failed_file = local_results_dir / "failed_traces.txt"
         with open(failed_file, "w") as fh:
-            fh.write(f"Failed traces: {len(failed_traces)} out of {len(df)}\n{'=' * 80}\n\n")
+            fh.write(
+                f"Failed traces: {len(failed_traces)} out of {len(df)}\n{'=' * 80}\n\n"
+            )
             for ft in failed_traces:
                 fh.write(
                     f"Task ID: {ft['task_id']}\n"
@@ -313,6 +375,7 @@ async def main(save_folder: str, df, df_summary=None, split: str = "algo", test_
     logger.info(
         f"Done: {len(df) - total_failed}/{len(df)} successful, {total_failed} failed"
     )
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

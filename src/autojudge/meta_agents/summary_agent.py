@@ -1,35 +1,46 @@
 from __future__ import annotations
 
+from typing import List, Optional
+
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIChatModel
-from typing import List, Optional
 
 from .prompts import TRACE_SUMMARIZATION_PROMPT
 
 
 class ExecutionStep(BaseModel):
     """Single step in the execution log."""
-    
+
     step_number: int = Field(description="Sequential step number")
     agent_name: str = Field(description="Agent performing this step")
-    action_type: str = Field(description="Type of action (tool_call/reasoning/communication/observation/output/error)")
-    description: str = Field(description="Detailed description of what was done/attempted")
-    error_message: Optional[str] = Field(default=None, description="Error details if any")
-    key_data: Optional[str] = Field(default=None, description="Important data from this step")
+    action_type: str = Field(
+        description="Type of action (tool_call/reasoning/communication/observation/output/error)"
+    )
+    description: str = Field(
+        description="Detailed description of what was done/attempted"
+    )
+    error_message: Optional[str] = Field(
+        default=None, description="Error details if any"
+    )
+    key_data: Optional[str] = Field(
+        default=None, description="Important data from this step"
+    )
 
 
 class TaskOverview(BaseModel):
     """Overview of the task and system."""
-    
+
     original_query: str = Field(description="The user's original question/task")
-    system_type: str = Field(description="Type of MAS (decentralized/ReAct/hierarchical/etc)")
+    system_type: str = Field(
+        description="Type of MAS (decentralized/ReAct/hierarchical/etc)"
+    )
     total_agents: int = Field(description="Total number of agents")
 
 
 class AgentSummary(BaseModel):
     """Summary of a single agent's activity."""
-    
+
     agent_name: str = Field(description="Name of the agent")
     role: str = Field(description="Agent's role/specialization")
     key_contributions: str = Field(description="Main contributions to task completion")
@@ -38,15 +49,17 @@ class AgentSummary(BaseModel):
 
 class TraceSummary(BaseModel):
     """Complete trace summarization result."""
-    
-    step_by_step_log: List[ExecutionStep] = Field(description="Chronological log of all execution steps")
+
+    step_by_step_log: List[ExecutionStep] = Field(
+        description="Chronological log of all execution steps"
+    )
     task_overview: TaskOverview
     agents_summary: List[AgentSummary]
 
 
 class TraceInput(BaseModel):
     """Input for trace summarization."""
-    
+
     trace: str = Field(description="Raw execution trace of the multi-agent system")
 
 
@@ -79,7 +92,7 @@ class TraceSummarizer:
         def get_system_prompt(ctx: RunContext[TraceInput]) -> str:
             """Generate system prompt with trace data."""
             trace_input = ctx.deps
-            
+
             return f"""{self.prompt_template}
 
 **TRACE:**
@@ -89,10 +102,10 @@ class TraceSummarizer:
 
     async def summarize(self, trace: str) -> TraceSummary:
         """Summarize the execution trace.
-        
+
         Args:
             trace: Raw execution trace string
-            
+
         Returns:
             TraceSummary object with structured analysis
         """

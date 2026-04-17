@@ -76,12 +76,16 @@ Parallel processing (4 agents):
 
             invalid_children = [c for c in children if c not in allowed]
             if invalid_children:
-                logger.warning(f"Removed invalid children {invalid_children} from agent '{parent}'")
+                logger.warning(
+                    f"Removed invalid children {invalid_children} from agent '{parent}'"
+                )
 
             validated[parent] = [c for c in children if c in allowed]
 
         if not validated and graph:
-            logger.warning("Validation resulted in empty graph. Returning original graph.")
+            logger.warning(
+                "Validation resulted in empty graph. Returning original graph."
+            )
             return graph
 
         return validated if validated else graph
@@ -112,7 +116,9 @@ Do not invent new agent names or use agents not present in the parent graphs."""
             result = await self._run_agent(user_prompt)
             return self._validate_graph(result.graph, parent1, parent2)
         except Exception:
-            logger.warning("Crossover error. Returning copy of best parent.", exc_info=True)
+            logger.warning(
+                "Crossover error. Returning copy of best parent.", exc_info=True
+            )
             if score1 and score2:
                 return copy.deepcopy(parent1 if score1 > score2 else parent2)
             return copy.deepcopy(parent1)

@@ -59,7 +59,9 @@ def normalize_gt_label(value) -> int | None:
     return None
 
 
-def parse_summarizer_results(directory_path: str, metric_name: str = "summarizer_score") -> pd.DataFrame:
+def parse_summarizer_results(
+    directory_path: str, metric_name: str = "summarizer_score"
+) -> pd.DataFrame:
     directory = Path(directory_path)
     json_files = [p for p in directory.glob("*.json") if p.name != "failed_traces.txt"]
 
@@ -103,12 +105,16 @@ def parse_summarizer_results(directory_path: str, metric_name: str = "summarizer
             print(f"Error processing file {file_path}: {exc}")
 
     if missing_score_files:
-        print(f"Files with missing/unknown summarizer score: {len(missing_score_files)}")
+        print(
+            f"Files with missing/unknown summarizer score: {len(missing_score_files)}"
+        )
 
     return pd.DataFrame(rows)
 
 
-def evaluate_against_gt(df_results: pd.DataFrame, human_gt_path: str, encoding: str = "ISO-8859-1"):
+def evaluate_against_gt(
+    df_results: pd.DataFrame, human_gt_path: str, encoding: str = "ISO-8859-1"
+):
     gt_df = pd.read_csv(human_gt_path, encoding=encoding)
 
     required_columns = {"trace_id", "ht"}

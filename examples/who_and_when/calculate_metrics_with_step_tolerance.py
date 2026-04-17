@@ -16,12 +16,12 @@ def main(folder_path: str):
     # Step accuracy at multiple tolerance levels
     TOLERANCES = [0, 1, 2, 3]
     step_correct = {t: 0 for t in TOLERANCES}
-    step_early = 0   # pred = gt - 1 (predicted one step too early)
-    step_late  = 0   # pred = gt + 1 (predicted one step too late)
+    step_early = 0  # pred = gt - 1 (predicted one step too early)
+    step_late = 0  # pred = gt + 1 (predicted one step too late)
     step_total = 0
-    gt_steps:   list[int] = []
+    gt_steps: list[int] = []
     pred_steps: list[int] = []
-    diffs:      list[int] = []
+    diffs: list[int] = []
 
     for filepath in folder.rglob("*.json"):  # all .json
         try:
@@ -40,12 +40,12 @@ def main(folder_path: str):
 
                 try:
                     # gt_step is 0-based in the dataset; normalize to 1-based to match judge output
-                    gt_step = int(item["gt_step"]) + 1      # for eval steps starting from 1 
-                    gt_step = int(item["gt_step"])          # for eval steps starting from 0
+                    gt_step = int(item["gt_step"]) + 1  # for eval steps starting from 1
+                    gt_step = int(item["gt_step"])  # for eval steps starting from 0
 
                     pred_step = int(item["score"]["step"])
                     step_total += 1
-                    diff = pred_step - gt_step          # signed
+                    diff = pred_step - gt_step  # signed
                     gt_steps.append(gt_step)
                     pred_steps.append(pred_step)
                     diffs.append(diff)
@@ -73,14 +73,24 @@ def main(folder_path: str):
         print(f"  {label:<26} {acc:.4f} ({step_correct[t]}/{step_total})")
     print()
     n = step_total if step_total > 0 else 1
-    print(f"  Step off by -1 (early): {step_early / n:.4f} ({step_early}/{step_total})  [pred = gt - 1]")
-    print(f"  Step off by +1 (late):  {step_late  / n:.4f} ({step_late}/{step_total})  [pred = gt + 1]")
+    print(
+        f"  Step off by -1 (early): {step_early / n:.4f} ({step_early}/{step_total})  [pred = gt - 1]"
+    )
+    print(
+        f"  Step off by +1 (late):  {step_late  / n:.4f} ({step_late}/{step_total})  [pred = gt + 1]"
+    )
 
     if step_total > 0:
         print()
-        print(f"  GT step   — mean: {statistics.mean(gt_steps):.2f}, median: {statistics.median(gt_steps):.1f}, min: {min(gt_steps)}, max: {max(gt_steps)}")
-        print(f"  Pred step — mean: {statistics.mean(pred_steps):.2f}, median: {statistics.median(pred_steps):.1f}, min: {min(pred_steps)}, max: {max(pred_steps)}")
-        print(f"  Error (pred-gt) — mean: {statistics.mean(diffs):+.2f}, median: {statistics.median(diffs):+.1f}, min: {min(diffs):+}, max: {max(diffs):+}")
+        print(
+            f"  GT step   — mean: {statistics.mean(gt_steps):.2f}, median: {statistics.median(gt_steps):.1f}, min: {min(gt_steps)}, max: {max(gt_steps)}"
+        )
+        print(
+            f"  Pred step — mean: {statistics.mean(pred_steps):.2f}, median: {statistics.median(pred_steps):.1f}, min: {min(pred_steps)}, max: {max(pred_steps)}"
+        )
+        print(
+            f"  Error (pred-gt) — mean: {statistics.mean(diffs):+.2f}, median: {statistics.median(diffs):+.1f}, min: {min(diffs):+}, max: {max(diffs):+}"
+        )
 
 
 if __name__ == "__main__":

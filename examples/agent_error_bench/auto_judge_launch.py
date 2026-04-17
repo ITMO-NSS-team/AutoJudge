@@ -5,22 +5,25 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import asyncio
 import os
+
 from dotenv import load_dotenv
 
 load_dotenv(".env")
 
-from autojudge.meta_agents import PoolGenerator
-from autojudge.pipeline import PipelineBuilder
-from autojudge.agent_pool import AgentPool
-from autojudge.pipeline.types import GraphDict
-from autojudge.utils.langfuse_utils import ainvoke_with_lf
-from autojudge.utils import get_logger
-from maseval import get_langfuse_judge_client
 import json
+
 import pandas as pd
-from autojudge.meta_agents.prompts import examples_tools as examples
-from autojudge.meta_agents.prompts import ae_output_schema, ae_taxonomy
+from maseval import get_langfuse_judge_client
+
+from autojudge.agent_pool import AgentPool
+from autojudge.meta_agents import PoolGenerator
 from autojudge.meta_agents.graph_gen import get_parallel_graph
+from autojudge.meta_agents.prompts import ae_output_schema, ae_taxonomy
+from autojudge.meta_agents.prompts import examples_tools as examples
+from autojudge.pipeline import PipelineBuilder
+from autojudge.pipeline.types import GraphDict
+from autojudge.utils import get_logger
+from autojudge.utils.langfuse_utils import ainvoke_with_lf
 
 logger = get_logger(__name__)
 
@@ -91,7 +94,6 @@ async def main(
                 "trace_id": trace_data["trace_id"],
             }
 
-
             judge_input = {
                 "history_for_evaluating": str(q),
                 "table_name": table_name,
@@ -151,7 +153,9 @@ async def main(
                 },
                 metadata=trace_metadata,
             ) as span:
-                judge_client.update_current_trace(tags=["agent_error_gaia", f"task_id:{id}"])
+                judge_client.update_current_trace(
+                    tags=["agent_error_gaia", f"task_id:{id}"]
+                )
 
                 logger.info("Executing evaluation pipeline...")
                 result, trace_id = await ainvoke_with_lf(
@@ -175,8 +179,12 @@ async def main(
                         "idx": str(idx),
                         "task_id": str(id),
                         "step_annotations": df.iloc[idx]["step_annotations"],
-                        "critical_failure_step": str(df.iloc[idx]["critical_failure_step"]),
-                        "critical_failure_module": df.iloc[idx]["critical_failure_module"],
+                        "critical_failure_step": str(
+                            df.iloc[idx]["critical_failure_step"]
+                        ),
+                        "critical_failure_module": df.iloc[idx][
+                            "critical_failure_module"
+                        ],
                     }
                 ],
             }
@@ -248,7 +256,9 @@ async def main(
 
 
 if __name__ == "__main__":
-    df_original = pd.read_json("/home/alina/Desktop/AutoJudge/examples/agent_error_bench/AgentErrorBench/Label/alfworld_labels.json")
+    df_original = pd.read_json(
+        "/home/alina/Desktop/AutoJudge/examples/agent_error_bench/AgentErrorBench/Label/alfworld_labels.json"
+    )
     summaries_directory = Path("/home/alina/Desktop/AutoJudge/ALFWorld")
 
     summary = []
@@ -256,7 +266,7 @@ if __name__ == "__main__":
         if file_path.is_file() and file_path.suffix == ".json":
             with open(file_path, "r") as f:
                 data = json.load(f)
-                summary.append([data, file_path.stem]) 
+                summary.append([data, file_path.stem])
     df_summary = pd.DataFrame(summary, columns=["summary", "question_ID"])
 
     asyncio.run(
@@ -264,6 +274,6 @@ if __name__ == "__main__":
             save_folder="alfworld_sm_db_16_04",
             df=df_original,
             df_summary=df_summary,
-            table_name="agent_error"
+            table_name="agent_error",
         )
     )

@@ -5,34 +5,44 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import asyncio
 import os
+
 from dotenv import load_dotenv
 
 load_dotenv(".env")
 
-from autojudge.meta_agents import PoolGenerator
-from autojudge.pipeline import PipelineBuilder
-from autojudge.agent_pool import AgentPool
-from autojudge.pipeline.types import GraphDict
-from autojudge.utils.langfuse_utils import ainvoke_with_lf
-from autojudge.utils import get_logger
-from autojudge.meta_agents.prompts import examples_no_tools as examples
-from autojudge.meta_agents.prompts import ae_output_schema, ae_taxonomy
-from maseval import get_langfuse_judge_client
-from autojudge.meta_agents.graph_gen import get_parallel_graph
-
 import json
+
 import pandas as pd
+from maseval import get_langfuse_judge_client
+
+from autojudge.agent_pool import AgentPool
+from autojudge.meta_agents import PoolGenerator
+from autojudge.meta_agents.graph_gen import get_parallel_graph
+from autojudge.meta_agents.prompts import ae_output_schema, ae_taxonomy
+from autojudge.meta_agents.prompts import examples_no_tools as examples
+from autojudge.pipeline import PipelineBuilder
+from autojudge.pipeline.types import GraphDict
+from autojudge.utils import get_logger
+from autojudge.utils.langfuse_utils import ainvoke_with_lf
 
 logger = get_logger(__name__)
 
 
 async def main(
-    save_folder: str, df, df_full, table_name: str, num_traces: int | None = None, tag: str = "ae_afworld_full_trace"
+    save_folder: str,
+    df,
+    df_full,
+    table_name: str,
+    num_traces: int | None = None,
+    tag: str = "ae_afworld_full_trace",
 ):
     logger.info("===Starting evaluation===")
 
     pool_gen = PoolGenerator(
-        output_schema=ae_output_schema, taxonomy=ae_taxonomy, examples=examples, use_summary=False
+        output_schema=ae_output_schema,
+        taxonomy=ae_taxonomy,
+        examples=examples,
+        use_summary=False,
     )
     judge_client = get_langfuse_judge_client()
     logger.info("Initialized generators and Langfuse client")
@@ -91,7 +101,6 @@ async def main(
                 "task_id": trace_data["task_id"],
                 "trace_id": trace_data["trace_id"],
             }
-
 
             judge_input = {
                 "history_for_evaluating": str(q),
@@ -176,8 +185,12 @@ async def main(
                         "idx": str(idx),
                         "task_id": str(id),
                         "step_annotations": df.iloc[idx]["step_annotations"],
-                        "critical_failure_step": str(df.iloc[idx]["critical_failure_step"]),
-                        "critical_failure_module": df.iloc[idx]["critical_failure_module"],
+                        "critical_failure_step": str(
+                            df.iloc[idx]["critical_failure_step"]
+                        ),
+                        "critical_failure_module": df.iloc[idx][
+                            "critical_failure_module"
+                        ],
                     }
                 ],
             }
@@ -249,14 +262,18 @@ async def main(
 
 
 if __name__ == "__main__":
-    df_labels = pd.read_json("/home/alina/Desktop/AutoJudge/examples/agent_error_bench/AgentErrorBench/Label/gaia_labels.json")
-    raw_data_directory = Path("/home/alina/Desktop/AutoJudge/examples/agent_error_bench/AgentErrorBench/Original_Failure_Trajectory/GAIA")
+    df_labels = pd.read_json(
+        "/home/alina/Desktop/AutoJudge/examples/agent_error_bench/AgentErrorBench/Label/gaia_labels.json"
+    )
+    raw_data_directory = Path(
+        "/home/alina/Desktop/AutoJudge/examples/agent_error_bench/AgentErrorBench/Original_Failure_Trajectory/GAIA"
+    )
     summary = []
     for file_path in raw_data_directory.iterdir():
         if file_path.is_file() and file_path.suffix == ".json":
             with open(file_path, "r") as f:
                 data = json.load(f)
-                summary.append([data["messages"], file_path.stem]) 
+                summary.append([data["messages"], file_path.stem])
     messages = pd.DataFrame(summary, columns=["messages", "question_ID"])
 
     asyncio.run(
@@ -265,6 +282,6 @@ if __name__ == "__main__":
             df=df_labels,
             df_full=messages,
             table_name="agent_error",
-            tag="FIXED_gaia_full_trace"
+            tag="FIXED_gaia_full_trace",
         )
     )

@@ -46,6 +46,7 @@ logger = logging.getLogger("count_dataset_tokens")
 
 # ---------- text builder --------------------------------------------------
 
+
 def build_text_generic(row: dict) -> str:
     """Concatenate all string-ish fields. For datasets with unknown schemas."""
     parts = []
@@ -65,9 +66,7 @@ def build_text_generic(row: dict) -> str:
     return "\n\n".join(parts)
 
 
-
-
-# dataset loaders 
+# dataset loaders
 def load_who_and_when(sample: int | None) -> Iterable[dict]:
     from datasets import load_dataset
 
@@ -142,6 +141,7 @@ DATASETS: dict[str, dict[str, Any]] = {
 
 # ---------- tokenization --------------------------------------------------
 
+
 def get_token_counter(model: str) -> tuple[Callable[[str], int], str]:
     """Get token counter for the specified model.
 
@@ -152,6 +152,7 @@ def get_token_counter(model: str) -> tuple[Callable[[str], int], str]:
     if model.startswith("gemini"):
         try:
             from google import genai
+
             client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
             def count_tokens_gemini(text: str) -> int:
@@ -159,7 +160,9 @@ def get_token_counter(model: str) -> tuple[Callable[[str], int], str]:
                     response = client.models.count_tokens(model=model, contents=text)
                     return response.total_tokens
                 except Exception as e:
-                    logger.warning(f"Gemini token counting failed: {e}; falling back to len/4")
+                    logger.warning(
+                        f"Gemini token counting failed: {e}; falling back to len/4"
+                    )
                     return max(1, len(text) // 4)
 
             return count_tokens_gemini, f"gemini/{model}"
@@ -172,13 +175,18 @@ def get_token_counter(model: str) -> tuple[Callable[[str], int], str]:
             import tiktoken
 
             enc = tiktoken.get_encoding(model)
-            return (lambda text: len(enc.encode(text, disallowed_special=()))), f"tiktoken/{model}"
+            return (
+                lambda text: len(enc.encode(text, disallowed_special=()))
+            ), f"tiktoken/{model}"
         except ImportError:
-            logger.warning("tiktoken not installed; falling back to len(text)//4 estimate")
+            logger.warning(
+                "tiktoken not installed; falling back to len(text)//4 estimate"
+            )
             return (lambda text: max(1, len(text) // 4)), "char/4 estimate"
 
 
 # output token estimation
+
 
 def estimate_output_tokens(dataset: str, count_fn: Callable[[str], int]) -> int:
     """
@@ -186,65 +194,75 @@ def estimate_output_tokens(dataset: str, count_fn: Callable[[str], int]) -> int:
     Uses the provided count_fn to count example outputs (respects model's tokenization).
     """
     outputs = {
-        "who_and_when": json.dumps({
-            "verdict": "fair",
-            "agent": "AgentName",
-            "justification": "Agent made a reasonable attempt but missed some edge case in the logic flow."
-        }),
-        "trail": json.dumps({
-            "errors": [
-                {
-                    "category": "Insufficient Validation",
-                    "location": "span-42",
-                    "evidence": "System accepted invalid input without checking constraints",
-                    "description": "The system failed to validate user input before processing, leading to potential data corruption.",
-                    "impact": "HIGH"
-                },
-                {
-                    "category": "Missing Error Handling",
-                    "location": "span-67",
-                    "evidence": "Exception thrown without recovery mechanism",
-                    "description": "An error occurred during processing but the system had no recovery mechanism.",
-                    "impact": "MEDIUM"
-                }
-            ],
-            "scores": [{
-                "reliability_score": 3,
-                "reliability_reasoning": "System has some fault tolerance but lacks comprehensive error handling mechanisms.",
-                "security_score": 2,
-                "security_reasoning": "Input validation is missing in critical paths and authentication checks are incomplete.",
-                "instruction_adherence_score": 3,
-                "instruction_adherence_reasoning": "System partially follows specified instructions but deviates in error scenarios.",
-                "plan_opt_score": 3,
-                "plan_opt_reasoning": "Plan is reasonable but has redundant steps and inefficient resource allocation.",
-                "overall": 2.75
-            }]
-        }),
-        "aegis": json.dumps({
-            "faulty_agents": [
-                {
-                    "agent_name": "Solver",
-                    "error_type": "FM-3.2",
-                    "evidence": "The agent failed to validate the response against the constraint.",
-                    "description": "Agent produced output that violated explicitly stated requirements without attempting verification."
-                },
-                {
-                    "agent_name": "Reviewer",
-                    "error_type": "FM-1.5",
-                    "evidence": "Review process did not catch obvious inconsistency in the response.",
-                    "description": "Verification step was bypassed or performed superficially, missing critical issues."
-                }
-            ],
-            "scores": [{
-                "reliability_score": 3,
-                "reliability_reasoning": "System handled most cases correctly but had gaps in error recovery mechanisms.",
-                "coordination_score": 2,
-                "coordination_reasoning": "Agent communication had delays and some information was not properly shared between components.",
-                "verification_score": 2,
-                "verification_reasoning": "Verification mechanisms were present but not applied consistently across all critical paths.",
-                "overall": 2.33
-            }]
-        })
+        "who_and_when": json.dumps(
+            {
+                "verdict": "fair",
+                "agent": "AgentName",
+                "justification": "Agent made a reasonable attempt but missed some edge case in the logic flow.",
+            }
+        ),
+        "trail": json.dumps(
+            {
+                "errors": [
+                    {
+                        "category": "Insufficient Validation",
+                        "location": "span-42",
+                        "evidence": "System accepted invalid input without checking constraints",
+                        "description": "The system failed to validate user input before processing, leading to potential data corruption.",
+                        "impact": "HIGH",
+                    },
+                    {
+                        "category": "Missing Error Handling",
+                        "location": "span-67",
+                        "evidence": "Exception thrown without recovery mechanism",
+                        "description": "An error occurred during processing but the system had no recovery mechanism.",
+                        "impact": "MEDIUM",
+                    },
+                ],
+                "scores": [
+                    {
+                        "reliability_score": 3,
+                        "reliability_reasoning": "System has some fault tolerance but lacks comprehensive error handling mechanisms.",
+                        "security_score": 2,
+                        "security_reasoning": "Input validation is missing in critical paths and authentication checks are incomplete.",
+                        "instruction_adherence_score": 3,
+                        "instruction_adherence_reasoning": "System partially follows specified instructions but deviates in error scenarios.",
+                        "plan_opt_score": 3,
+                        "plan_opt_reasoning": "Plan is reasonable but has redundant steps and inefficient resource allocation.",
+                        "overall": 2.75,
+                    }
+                ],
+            }
+        ),
+        "aegis": json.dumps(
+            {
+                "faulty_agents": [
+                    {
+                        "agent_name": "Solver",
+                        "error_type": "FM-3.2",
+                        "evidence": "The agent failed to validate the response against the constraint.",
+                        "description": "Agent produced output that violated explicitly stated requirements without attempting verification.",
+                    },
+                    {
+                        "agent_name": "Reviewer",
+                        "error_type": "FM-1.5",
+                        "evidence": "Review process did not catch obvious inconsistency in the response.",
+                        "description": "Verification step was bypassed or performed superficially, missing critical issues.",
+                    },
+                ],
+                "scores": [
+                    {
+                        "reliability_score": 3,
+                        "reliability_reasoning": "System handled most cases correctly but had gaps in error recovery mechanisms.",
+                        "coordination_score": 2,
+                        "coordination_reasoning": "Agent communication had delays and some information was not properly shared between components.",
+                        "verification_score": 2,
+                        "verification_reasoning": "Verification mechanisms were present but not applied consistently across all critical paths.",
+                        "overall": 2.33,
+                    }
+                ],
+            }
+        ),
     }
 
     if dataset not in outputs:
@@ -254,9 +272,13 @@ def estimate_output_tokens(dataset: str, count_fn: Callable[[str], int]) -> int:
     return count_fn(outputs[dataset])
 
 
-# ---------- stats ---------------------------------------------------------
-
-def summarize(counts: list[int], output_tokens_per_trace: int, price_per_1m_input: float, price_per_1m_output: float, static_overhead: int) -> dict:
+def summarize(
+    counts: list[int],
+    output_tokens_per_trace: int,
+    price_per_1m_input: float,
+    price_per_1m_output: float,
+    static_overhead: int,
+) -> dict:
     if not counts:
         return {"traces": 0}
     counts_with_overhead = [c + static_overhead for c in counts]
@@ -289,20 +311,45 @@ def summarize(counts: list[int], output_tokens_per_trace: int, price_per_1m_inpu
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--dataset", required=True, choices=sorted(DATASETS.keys()))
-    parser.add_argument("--sample", type=int, default=None,
-                        help="Limit to first N traces (faster, partial estimate).")
-    parser.add_argument("--model", default="gemini-2.5-flash",
-                        help="Model for token counting: 'gemini-2.5-flash' or tiktoken encoding (default: gemini-2.5-flash).")
-    parser.add_argument("--price-per-1m-input", type=float, default=0.3,
-                        help="USD per 1M input tokens (default: 0.3 for Gemini-2.5-flash).")
-    parser.add_argument("--price-per-1m-output", type=float, default=2.5,
-                        help="USD per 1M output tokens (default: 2.5 for Gemini-2.5-flash).")
-    parser.add_argument("--static-overhead", type=int, default=0,
-                        help="Constant tokens added per judge call (taxonomy + output_schema + examples).")
-    parser.add_argument("--output-json", type=str, default=None,
-                        help="Optional path to dump per-trace counts as JSON.")
+    parser.add_argument(
+        "--sample",
+        type=int,
+        default=None,
+        help="Limit to first N traces (faster, partial estimate).",
+    )
+    parser.add_argument(
+        "--model",
+        default="gemini-2.5-flash",
+        help="Model for token counting: 'gemini-2.5-flash' or tiktoken encoding (default: gemini-2.5-flash).",
+    )
+    parser.add_argument(
+        "--price-per-1m-input",
+        type=float,
+        default=0.3,
+        help="USD per 1M input tokens (default: 0.3 for Gemini-2.5-flash).",
+    )
+    parser.add_argument(
+        "--price-per-1m-output",
+        type=float,
+        default=2.5,
+        help="USD per 1M output tokens (default: 2.5 for Gemini-2.5-flash).",
+    )
+    parser.add_argument(
+        "--static-overhead",
+        type=int,
+        default=0,
+        help="Constant tokens added per judge call (taxonomy + output_schema + examples).",
+    )
+    parser.add_argument(
+        "--output-json",
+        type=str,
+        default=None,
+        help="Optional path to dump per-trace counts as JSON.",
+    )
     args = parser.parse_args()
 
     cfg = DATASETS[args.dataset]
@@ -318,7 +365,13 @@ def main():
         counts.append(count_fn(text))
 
     output_tokens = estimate_output_tokens(args.dataset, count_fn)
-    stats = summarize(counts, output_tokens_per_trace=output_tokens, price_per_1m_input=args.price_per_1m_input, price_per_1m_output=args.price_per_1m_output, static_overhead=args.static_overhead)
+    stats = summarize(
+        counts,
+        output_tokens_per_trace=output_tokens,
+        price_per_1m_input=args.price_per_1m_input,
+        price_per_1m_output=args.price_per_1m_output,
+        static_overhead=args.static_overhead,
+    )
     stats["dataset"] = args.dataset
     stats["model"] = args.model
     stats["counter_backend"] = backend
@@ -328,7 +381,9 @@ def main():
     if args.output_json:
         out = Path(args.output_json)
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps({"stats": stats, "per_trace_input_tokens": counts}, indent=2))
+        out.write_text(
+            json.dumps({"stats": stats, "per_trace_input_tokens": counts}, indent=2)
+        )
         logger.info(f"Wrote per-trace counts to {out}")
 
 

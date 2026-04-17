@@ -5,25 +5,29 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import asyncio
 import os
+
 from dotenv import load_dotenv
 
 load_dotenv(".env")
 
-from autojudge.meta_agents import PoolGenerator
-from autojudge.pipeline import PipelineBuilder
-from autojudge.agent_pool import AgentPool
-from autojudge.pipeline.types import GraphDict
-from autojudge.utils.langfuse_utils import ainvoke_with_lf
-from autojudge.utils import get_logger
-from maseval import get_langfuse_judge_client
 import json
+
 import pandas as pd
+from maseval import get_langfuse_judge_client
 from toon_format import encode
+
+from autojudge.agent_pool import AgentPool
+from autojudge.meta_agents import PoolGenerator
+from autojudge.meta_agents.graph_gen import get_parallel_graph
 from autojudge.meta_agents.prompts import examples_no_tools as examples
 from autojudge.meta_agents.prompts import ww_output_schema, ww_taxonomy
-from autojudge.meta_agents.graph_gen import get_parallel_graph
+from autojudge.pipeline import PipelineBuilder
+from autojudge.pipeline.types import GraphDict
+from autojudge.utils import get_logger
+from autojudge.utils.langfuse_utils import ainvoke_with_lf
 
 logger = get_logger(__name__)
+
 
 async def main(
     save_folder: str, df, df_summary, table_name: str, num_traces: int | None = None

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from typing import List, Optional
+
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIChatModel
-from typing import List, Optional
 
 from .prompts import STEPS_BATCH_SUMMARIZATION_PROMPT
 

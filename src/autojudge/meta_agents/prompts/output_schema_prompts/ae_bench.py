@@ -1,4 +1,3 @@
-
 taxonomy = """
 You must analyze the trajectory using AgentErrorTaxonomy.
 

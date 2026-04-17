@@ -7,7 +7,11 @@ from autojudge.db.config import DB_HOST, DB_NAME, DB_PASSWORD, DB_PORT, DB_USER
 def get_conn(db: str = DB_NAME) -> psycopg2.extensions.connection:
     try:
         return psycopg2.connect(
-            dbname=db, user=DB_USER, password=DB_PASSWORD or None, host=DB_HOST, port=DB_PORT
+            dbname=db,
+            user=DB_USER,
+            password=DB_PASSWORD or None,
+            host=DB_HOST,
+            port=DB_PORT,
         )
     except psycopg2.OperationalError as e:
         if "does not exist" in str(e):
@@ -23,7 +27,11 @@ def get_conn(db: str = DB_NAME) -> psycopg2.extensions.connection:
 
 def create_database() -> None:
     conn = psycopg2.connect(
-        dbname="postgres", user=DB_USER, password=DB_PASSWORD or None, host=DB_HOST, port=DB_PORT
+        dbname="postgres",
+        user=DB_USER,
+        password=DB_PASSWORD or None,
+        host=DB_HOST,
+        port=DB_PORT,
     )
     conn.autocommit = True
     cur = conn.cursor()

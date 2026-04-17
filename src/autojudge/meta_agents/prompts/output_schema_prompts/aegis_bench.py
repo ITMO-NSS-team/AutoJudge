@@ -1,4 +1,3 @@
-
 taxonomy = """
 ### Functional Mistakes (FM-1.x - Task Execution Errors):
 - FM-1.1: **Task specification deviation** - Agent deviates from specified task requirements (e.g., was asked to write code in Python, but used JavaScript).

@@ -10,9 +10,9 @@ from pydantic_ai import Agent, RunUsage
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 
+from autojudge.db.db_tools import get_content_tool
 from autojudge.pipeline.types import UsageTrackingMixin
 from autojudge.utils.langfuse_utils import setup_langfuse_instrumentation
-from autojudge.db.db_tools import get_content_tool
 
 load_dotenv()
 

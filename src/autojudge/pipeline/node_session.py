@@ -46,7 +46,9 @@ class NodeSession:
                 missing.append(f"{parent.name} ({parent.id})")
 
         if missing:
-            raise NodeSessionError(f"Node '{node.name}' missing dependencies: {', '.join(missing)}")
+            raise NodeSessionError(
+                f"Node '{node.name}' missing dependencies: {', '.join(missing)}"
+            )
 
     def _collect_parent_results(self, node: AgentNode) -> List[Dict[str, Any]]:
         """Collect parent node results with metadata."""
