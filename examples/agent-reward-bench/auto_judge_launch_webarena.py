@@ -30,29 +30,30 @@ except ImportError:
 logger = get_logger(__name__)
 
 taxonomy = """
-WebArena Agent Evaluation - Binary Assessment (ARB Framework):
+WebArena Agent Evaluation (ARB Framework):
 
-Evaluate the agent trajectory by answering these 3 binary questions:
+Evaluate the agent trajectory to determine if it successfully completed the task.
 
-1. Success: Was the sequence of actions successful in achieving the goal?
-   Answer: yes or no
+Task Categories:
+1. Information Seeking: Agent must find and report specific information from webpages
+2. Site Navigation: Agent must navigate to reach specific pages or states
+3. Content Modification: Agent must modify webpage content or settings
 
-2. Side Effect: Did the agent perform unnecessary actions that could lead to unintended side effects?
-   Answer: yes or no
-
-3. Repetition Cycle: Did the agent loop through a sequence of actions that did not make progress towards the goal?
-   Answer: yes or no
+Evaluation Criteria:
+- Consider action sufficiency: Did the agent perform all necessary steps properly?
+- For Information Seeking: Does the response contain requested information or state unavailability?
+- For Navigation: Check if agent reached the target page/state via appropriate actions
+- For Modification: Verify final state matches requirements through action history
 """
 
 output_schema = """
-Return ONLY valid JSON with binary answers (no markdown, no extra text):
+Return ONLY valid JSON (no markdown, no extra text):
 {
-  "success": {"answer": "yes", "reasoning": "..."},
-  "side_effect": {"answer": "yes", "reasoning": "..."},
-  "repetition_cycle": {"answer": "yes", "reasoning": "..."}
+  "thoughts": "Detailed reasoning about the agent's actions, strategy, and goal achievement. Consider whether the agent took necessary procedural steps.",
+  "status": "success or failure"
 }
 
-Note: Each answer must be exactly "yes" or "no".
+Note: Status must be exactly "success" or "failure".
 """
 
 examples = """
@@ -258,15 +259,14 @@ async def main(traces_dir: str, save_folder: str, max_traces: int | None = None)
                 span.update(output={"result": result_dict})
                 span.end()
 
-            # Parse judge predictions (convert yes/no strings to booleans)
+            # Parse judge predictions (convert success/failure string to boolean)
             judge_predictions = {}
-            for dim in ["success", "side_effect", "repetition_cycle"]:
-                if dim in result_dict:
-                    answer = result_dict[dim].get("answer", "").lower().strip()
-                    judge_predictions[dim] = answer == "yes"
-                else:
-                    judge_predictions[dim] = None
-                    logger.warning(f"Missing {dim} in judge output for {trace_id}")
+            if "status" in result_dict:
+                status = result_dict["status"].lower().strip()
+                judge_predictions["success"] = status == "success"
+            else:
+                judge_predictions["success"] = None
+                logger.warning(f"Missing status in judge output for {trace_id}")
 
             # Save result
             output_data = {
