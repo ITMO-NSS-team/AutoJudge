@@ -357,7 +357,7 @@ async def main(data_dir: str, save_folder: str, max_traces: int | None = None):
 
         except Exception as e:
             error_msg = str(e)
-            logger.error(f"Error processing task {trace_id}: {error_msg}", exc_info=True)
+            logger.error("Error processing task {}: {}", trace_id, error_msg, exc_info=True)
             failed_traces.append({"task_id": trace_id, "error": error_msg})
 
     if failed_traces:
