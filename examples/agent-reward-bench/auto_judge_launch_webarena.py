@@ -18,7 +18,7 @@ from automas.agent_pool import AgentPool
 from automas.pipeline.types import GraphDict
 from automas.pipeline import PipelineBuilder
 from automas.utils import get_logger
-from automas.utils.langfuse_utils import ainvoke_with_lf
+from automas.utils.langfuse_utils import ainvoke_with_lf, setup_langfuse_instrumentation
 
 try:
     from maseval import get_langfuse_judge_client
@@ -65,16 +65,158 @@ Return ONLY valid JSON (no markdown, no extra text):
 }
 """
 
+
 examples = """
 Example 1 - MAS Task Completion Evaluation:
 [
   {
     "name": "MAS_TASK_COMPLETION_JUDGE",
-    "instructions": "**Instruction**:\nEvaluate whether the multi-agent system fully completed the user's task by assessing end-to-end outcome across all agents.\n\n**Evaluation Criteria**:\n1. *Task Relevance* - Does output address the main objective?\n2. *Completeness* - Are all required subtasks/steps present?\n3. *Consistency* - Are agent outputs logically coherent without contradictions?\n4. *Actionability* - Can the user act on outputs to achieve their goal?\n5. *Efficiency* - Were tasks completed without unnecessary duplication?\n\n**Scoring**:\n- \"ideal\": Task fully achieved, all subtasks addressed, outputs consistent and actionable\n- \"fair\": Task largely achieved but minor omissions or slight inconsistencies\n- \"poor\": Task failed, critical steps missing, inconsistent or unusable outputs\n\nReturn JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "instructions": "**Instruction**:
+Evaluate whether the multi-agent system fully completed the user's task by assessing end-to-end outcome across all agents.
+
+**Evaluation Criteria**:
+1. *Task Relevance* - Does output address the main objective?
+2. *Completeness* - Are all required subtasks/steps present?
+3. *Consistency* - Are agent outputs logically coherent without contradictions?
+4. *Actionability* - Can the user act on outputs to achieve their goal?
+5. *Efficiency* - Were tasks completed without unnecessary duplication?
+
+**Scoring**:
+- \"ideal\": Task fully achieved, all subtasks addressed, outputs consistent and actionable
+- \"fair\": Task largely achieved but minor omissions or slight inconsistencies
+- \"poor\": Task failed, critical steps missing, inconsistent or unusable outputs
+
+Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
     "mcp_tools": []
   }
 ]
-"""
+
+Example 2 - MAS Complexity Assessment:
+[
+  {
+    "name": "MAS_COMPLEXITY_JUDGE",
+    "instructions": "**Instruction**:
+Evaluate complexity and interconnectedness of the multi-agent system.
+
+**Evaluation Criteria**:
+1. *Agent Density* - Is number of agents appropriate for system scope?
+2. *Interconnection Quality* - Are agent connections well-designed and efficient?
+3. *System Scalability* - Can architecture accommodate growth and maintainability?
+
+**Scoring**:
+- \"ideal\": Complexity perfectly balanced with optimal density and connections
+- \"fair\": Complexity manageable but has scalability or efficiency issues
+- \"poor\": Complexity poorly managed with density or connection problems
+
+Return single JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "mcp_tools": []
+  }
+]
+
+Example 3 - Tool Performance Evaluation:
+[
+  {
+    "name": "TOOL_PERFORMANCE_JUDGE",
+    "instructions": "**Instruction**:
+Assess whether tools successfully fulfilled user requests by evaluating execution outcome quality.
+
+**Evaluation Criteria**:
+1. *Task Completion* - Did tool fully accomplish the request?
+2. *Accuracy* - Is output accurate, relevant, and logically consistent?
+3. *Clarity* - Is output clear, structured, and in expected format?
+4. *Failure Handling* - Any errors or unrelated information returned?
+
+**Scoring** (strict - zero tolerance for errors):
+- \"ideal\": Output perfectly solves task, all parts correct and complete
+- \"fair\": Output mostly correct but minor issues or omissions
+- \"poor\": Output fails task, incorrect, incomplete, or misleading
+
+Return JSON list: [{\"state_id\": \"...\", \"justification\": \"...\", \"score\": \"ideal|fair|poor\"}]",
+    "mcp_tools": []
+  }
+]
+
+Example 4 - Environment Setup Error Detection:
+[
+  {
+    "name": "MAS_ENVIRONMENT_SETUP_JUDGE",
+    "instructions": "**Instruction**:
+Analyze execution trace to identify environment setup and configuration errors that occurred BEFORE or DURING initialization.
+
+**Scope**: Focus on initialization phase errors, NOT runtime API errors.
+
+**Evaluation Criteria** - Look for trace entries showing:
+1. *File System Issues* - Permission denied, access errors (PermissionError, errno 13)
+2. *Credential Problems* - Missing API keys in config (KeyError: 'API_KEY')
+3. *Environment Variables* - Missing or invalid env vars (os.environ KeyError)
+4. *Config Files* - Missing or malformed configs (FileNotFoundError, JSONDecodeError)
+5. *Dependencies* - Import errors or version conflicts (ModuleNotFoundError)
+You must use the available tools at least once!
+
+**Out of Scope**: HTTP status codes (401, 403, 429, 500), runtime API errors, network timeouts
+
+**Scoring**:
+- \"ideal\": No setup errors, clean initialization
+- \"fair\": Minor warnings but system recovered with defaults
+- \"poor\": Critical setup errors prevented system startup
+
+Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "mcp_tools": []
+  }
+]
+
+Example 5 - API Issues Detection:
+[
+  {
+    "name": "MAS_API_ISSUES_JUDGE",
+    "instructions": "**Instruction**:
+Analyze execution trace to identify API-related errors during RUNTIME execution.
+
+**Scope**: Focus on runtime API communication errors, NOT initialization/config errors.
+You must use the available tools at least once!
+
+**Evaluation Criteria** - Look for trace entries showing:
+1. *Rate Limiting* - HTTP 429, "Rate limit exceeded" (RateLimitError)
+2. *Auth Errors* - HTTP 401/403 during API calls, "Invalid token" (AuthenticationError)
+3. *Server Errors* - HTTP 500/502/503/504, "Internal Server Error"
+4. *Not Found* - HTTP 404, "Endpoint not found"
+5. *Client Errors* - HTTP 400/422, "Bad Request", "Validation failed"
+6. *Network Failures* - Connection timeout, "Connection refused" (ConnectionError)
+
+**Out of Scope**: Environment variable errors, config file issues, local file permissions
+
+**Scoring**:
+- \"ideal\": No API errors, all external calls succeeded
+- \"fair\": Minor/temporary API errors but system recovered
+- \"poor\": Critical API errors prevented task completion or occurred repeatedly
+
+Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "mcp_tools": []
+  }
+]
+
+Example 6 - Tool Selection Evaluation:
+[
+  {
+    "name": "TOOL_SELECTION_JUDGE",
+    "instructions": "**Instruction**:
+Assess whether tool selections made by the agent are appropriate for the task.
+
+**Evaluation Criteria**:
+1. *Tool Relevance* - Does the selected tool directly address the node_role responsibility?
+2. *Pipeline Position* - Is the tool suitable given the agent's position in the pipeline?
+3. *Justification* - Is the tool selection clearly supported by the task requirements?
+
+**Scoring**:
+- \"ideal\": Tool selection perfectly matches node_role and is clearly justified
+- \"fair\": Selection is relevant but potentially suboptimal for the task
+- \"poor\": Selection is inappropriate or clearly mismatched to node_role
+
+Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "mcp_tools": []
+  }
+]"""
+
 
 def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
     """All judges feed into FINAL_AGGREGATOR."""
@@ -88,10 +230,10 @@ def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
 def format_trace_for_judge(trace_data: dict, max_steps: int = 30) -> str:
     """Format WebArena trace into judge input."""
     steps = trace_data.get("steps", [])
-    summary_info = trace_data.get("summary_info", {})
+    summary_info = trace_data.get("summary_info") or {}
 
     lines = [
-        f"Goal: {trace_data.get('goal', '').strip()[:200]}",
+        f"Goal: {str(trace_data.get('goal', '')).strip()[:200]}",
         f"Model: {trace_data.get('model', '')}",
         f"Steps taken: {len(steps)}",
         f"Ground truth task success: {summary_info.get('task_success')}",
@@ -99,8 +241,12 @@ def format_trace_for_judge(trace_data: dict, max_steps: int = 30) -> str:
     ]
 
     for step in steps[:max_steps]:
-        action = step.get("action", "unknown")[:80]
-        error = f" [ERROR: {step.get('last_action_error', '')[:40]}]" if step.get("last_action_error") else ""
+        if not isinstance(step, dict):
+            continue
+        
+        action = str(step.get("action") or "unknown")[:80]
+        err_val = step.get('last_action_error')
+        error = f" [ERROR: {str(err_val)[:40]}]" if err_val else ""
         lines.append(f"  - {action}{error}")
 
     if len(steps) > max_steps:
@@ -121,18 +267,24 @@ async def evaluate_trace(trace_id: str, trace_data: dict, pool_gen, judge_client
     # Create pool with retries
     attempts = 0
     pool = None
+    attempt_errors = []
     while attempts < 3:
         try:
             pool = await pool_gen.create_pool(judge_input)
             agents = pool.full_agents_data
             if any(a["name"] == "FINAL_AGGREGATOR" for a in agents):
                 break
+            else:
+                attempt_errors.append("FINAL_AGGREGATOR missing from pool.")
+                pool = None
         except Exception as e:
+            attempt_errors.append(str(e))
             logger.warning(f"Pool creation attempt {attempts + 1} failed: {e}")
         attempts += 1
 
     if pool is None:
-        raise RuntimeError("Failed to create pool after 3 attempts")
+        error_block = "\n".join(f"- {e}" for e in attempt_errors)
+        raise RuntimeError(f"Failed to create pool after 3 attempts. Errors:\n{error_block}")
 
     # Build pipeline
     graph = get_parallel_graph(pool)
@@ -148,7 +300,7 @@ async def evaluate_trace(trace_id: str, trace_data: dict, pool_gen, judge_client
             metadata={"task_id": trace_id, "benchmark": "webarena"},
         )
         span.__enter__()
-        judge_client.update_current_trace(tags=["webarena", f"task_id:{trace_id}"])
+        judge_client.update_current_trace(tags=["webarena", "arb", "autojudge", f"task_id:{trace_id}"])
 
     result, trace_id_lf = await ainvoke_with_lf(pool, pipeline, judge_input, graph)
 
@@ -203,6 +355,7 @@ async def main(data_dir: str, save_folder: str, max_traces: int | None = None):
 
     pool_gen = PoolGenerator(output_schema=output_schema, taxonomy=taxonomy, examples=examples)
     judge_client = get_langfuse_judge_client()
+    setup_langfuse_instrumentation()
 
     data_dir = Path(data_dir)
     cleaned_dir = data_dir / "cleaned"
@@ -292,8 +445,8 @@ async def main(data_dir: str, save_folder: str, max_traces: int | None = None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate WebArena with AutoJudge")
-    parser.add_argument("--data-dir", default="data/test", help="Path to base data directory containing cleaned/ and pruned/ folders")
-    parser.add_argument("--save-folder", required=True, help="Output folder name")
+    parser.add_argument("--data-dir", default="./data", help="Path to base data directory containing cleaned/ and pruned/ folders")
+    parser.add_argument("--save-folder", default="webarena_results", help="Output folder name")
     parser.add_argument("--max-traces", type=int, default=None, help="Max traces to evaluate")
     parser.add_argument("--test", action="store_true", help="Test mode: run on 5 traces")
 

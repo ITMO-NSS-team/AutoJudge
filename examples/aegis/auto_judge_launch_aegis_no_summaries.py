@@ -122,15 +122,13 @@ Evaluate whether the multi-agent system fully completed the user's task by asses
 4. *Actionability* - Can the user act on outputs to achieve their goal?
 5. *Efficiency* - Were tasks completed without unnecessary duplication?
 
-You must use the available tools at least once!
-
 **Scoring**:
 - \"ideal\": Task fully achieved, all subtasks addressed, outputs consistent and actionable
 - \"fair\": Task largely achieved but minor omissions or slight inconsistencies
 - \"poor\": Task failed, critical steps missing, inconsistent or unusable outputs
 
 Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": [get_content_tool]
+    "mcp_tools": []
   }
 ]
 
@@ -146,15 +144,13 @@ Evaluate complexity and interconnectedness of the multi-agent system.
 2. *Interconnection Quality* - Are agent connections well-designed and efficient?
 3. *System Scalability* - Can architecture accommodate growth and maintainability?
 
-You must use the available tools at least once!
-
 **Scoring**:
 - \"ideal\": Complexity perfectly balanced with optimal density and connections
 - \"fair\": Complexity manageable but has scalability or efficiency issues
 - \"poor\": Complexity poorly managed with density or connection problems
 
 Return single JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": [get_content_tool]
+    "mcp_tools": []
   }
 ]
 
@@ -171,15 +167,13 @@ Assess whether tools successfully fulfilled user requests by evaluating executio
 3. *Clarity* - Is output clear, structured, and in expected format?
 4. *Failure Handling* - Any errors or unrelated information returned?
 
-You must use the available tools at least once!
-
 **Scoring** (strict - zero tolerance for errors):
 - \"ideal\": Output perfectly solves task, all parts correct and complete
 - \"fair\": Output mostly correct but minor issues or omissions
 - \"poor\": Output fails task, incorrect, incomplete, or misleading
 
 Return JSON list: [{\"state_id\": \"...\", \"justification\": \"...\", \"score\": \"ideal|fair|poor\"}]",
-    "mcp_tools": [get_content_tool]
+    "mcp_tools": []
   }
 ]
 
@@ -208,7 +202,7 @@ You must use the available tools at least once!
 - \"poor\": Critical setup errors prevented system startup
 
 Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": [get_content_tool]
+    "mcp_tools": []
   }
 ]
 
@@ -705,7 +699,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # folder for output
-    folder = "aegis_eval_summaries_test" if args.test else "aegis_eval_summaries_fixed"
+    folder = "aegis_eval_no_summaries_test" if args.test else "aegis_eval_no_summaries"
     
     max_traces = 5 if args.test else None
 
