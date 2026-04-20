@@ -29,6 +29,23 @@ except ImportError:
 
 logger = get_logger(__name__)
 
+judge_sys_prompt = """Your objective is to give a score to the agent based on how well it completed its task.
+
+Scoring Guide:
+- 5: Flawless execution. Agent completed all required steps with no errors.
+- 4: Minor errors or >70% task completion. Small mistakes but goal largely achieved.
+- 3 or below: Agent made very little progress. Critical steps missing or major failures.
+
+Evaluation Process:
+1. Carefully analyze what steps the instruction (goal) requires
+2. Examine if the trajectory demonstrates successful completion of those steps
+3. Consider whether the agent's action sequence logically addresses the goal
+4. Award scores based on task completion percentage and error severity
+
+Output Format:
+Start with "Thought: <your reasoning about task completion>"
+Then provide "Reward: <score>" where score is 1-5"""
+
 taxonomy = """
 WebArena Agent Evaluation (ARB Framework):
 
@@ -58,11 +75,14 @@ Evaluation Criteria:
 output_schema = """
 Return ONLY valid JSON (no markdown, no extra text):
 {
-  "thoughts": "Detailed reasoning about the agent's actions, strategy, and goal achievement. Consider whether the agent took necessary procedural steps.",
-  "status": "success or failure"
+  "thought": "Your reasoning about whether the agent completed the required steps and achieved the goal.",
+  "reward": <score_1_to_5>
 }
 
-Note: Status must be exactly "success" or "failure".
+Note: Reward must be an integer from 1 to 5.
+5 = Flawless completion
+4 = Minor errors or >70% completion
+3 or below = Little progress or major failures
 """
 
 
@@ -385,14 +405,18 @@ async def main(traces_dir: str, save_folder: str, max_traces: int | None = None)
                 span.update(output={"result": result_dict})
                 span.end()
 
-            # Parse judge predictions (convert success/failure string to boolean)
+            # Parse judge predictions (extract reward score)
             judge_predictions = {}
-            if "status" in result_dict:
-                status = result_dict["status"].lower().strip()
-                judge_predictions["success"] = status == "success"
+            if "reward" in result_dict:
+                try:
+                    reward = int(result_dict["reward"])
+                    judge_predictions["reward"] = reward
+                except (ValueError, TypeError):
+                    judge_predictions["reward"] = None
+                    logger.warning(f"Invalid reward format in judge output for {trace_id}")
             else:
-                judge_predictions["success"] = None
-                logger.warning(f"Missing status in judge output for {trace_id}")
+                judge_predictions["reward"] = None
+                logger.warning(f"Missing reward in judge output for {trace_id}")
 
             # Save result
             output_data = {
