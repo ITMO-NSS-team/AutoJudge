@@ -11,14 +11,17 @@ def load_arb_ground_truth(annotations_file: str) -> dict:
             reader = csv.DictReader(f)
             for row in reader:
                 task_id = row.get("task_id")
-                if not task_id:
+                model_name = row.get("model_name")
+                if not task_id or not model_name:
                     continue
-                
+
+                unique_task_id = f"{model_name}_{task_id}"
+
                 success = row.get("trajectory_success", "").lower() == "successful"
                 side_effect = row.get("trajectory_side_effect", "").lower() == "yes"
                 looping = row.get("trajectory_looping", "").lower() == "yes"
 
-                ground_truth[task_id] = {
+                ground_truth[unique_task_id] = {
                     "success": success,
                     "side_effect": side_effect,
                     "repetition_cycle": looping,

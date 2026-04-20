@@ -70,14 +70,18 @@ def process_and_clean_trajectories(input_dir: Path, output_dir: Path, test_mode:
             data.pop("trajectory_dir", None)
             data.pop("logs", None)
 
-            # Save using standard task_id directly
+            # Ensure unique task_id by incorporating the agent name
             task_id = data.get("task_id", traj_file.stem)
+            agent_name = data.get("agent", "UnknownAgent")
             if task_id.startswith("cleaned_"): task_id = task_id.replace("cleaned_", "")
             if task_id.startswith("converted_"): task_id = task_id.replace("converted_", "")
             if task_id.startswith("pruned_"): task_id = task_id.replace("pruned_", "")
-            data["task_id"] = task_id
             
-            save_path = output_dir / f"{task_id}.json"
+            # Formulate unique ID for each attempt
+            unique_task_id = f"{agent_name}_{task_id}"
+            data["task_id"] = unique_task_id
+
+            save_path = output_dir / f"{unique_task_id}.json"
             with open(save_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
 
