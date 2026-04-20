@@ -18,7 +18,6 @@ from automas.agent_pool import AgentPool
 from automas.pipeline.types import GraphDict
 from automas.pipeline import PipelineBuilder
 from automas.utils import get_logger
-from automas.utils.langfuse_utils import ainvoke_with_lf, setup_langfuse_instrumentation
 
 try:
     from maseval import get_langfuse_judge_client
@@ -217,17 +216,23 @@ async def evaluate_trace(trace_id: str, trace_data: dict, pool_gen, judge_client
     pipeline = builder.create_from_pool(pool, graph).build()
 
     # Execute with Langfuse tracing (if available)
-    span = None
+    trace_id_lf = ""
+    raw_result = None
+    t = None
+    
     if judge_client:
-        span = judge_client.start_as_current_span(
+        # Create a trace specifically in the judge project
+        with judge_client.trace(
             name=f"evaluate_webarena_{trace_id}",
-            input={"task_id": trace_id},
-            metadata={"task_id": trace_id, "benchmark": "webarena"},
-        )
-        span.__enter__()
-        judge_client.update_current_trace(tags=["webarena", "arb", "autojudge", f"task_id:{trace_id}"])
+            tags=["webarena", "arb", "autojudge", f"task_id:{trace_id}"],
+            metadata={"task_id": trace_id, "benchmark": "webarena"}
+        ) as t:
+            trace_id_lf = t.id
+            raw_result = await pipeline.ainvoke(judge_input)
+    else:
+        raw_result = await pipeline.ainvoke(judge_input)
 
-    result, trace_id_lf = await ainvoke_with_lf(pool, pipeline, judge_input, graph)
+    result = raw_result.get("response") if isinstance(raw_result, dict) else raw_result
 
     # Clean JSON output
     clean = result.strip()
@@ -244,9 +249,9 @@ async def evaluate_trace(trace_id: str, trace_data: dict, pool_gen, judge_client
     except json.JSONDecodeError:
         result_dict = {"raw": result}
 
-    if span:
-        span.update(output={"result": result_dict})
-        span.__exit__(None, None, None)
+    if t:
+        t.update(output={"result": result_dict})
+        judge_client.flush()
 
     # Parse judge predictions
     judge_predictions = {}
@@ -280,7 +285,6 @@ async def main(data_dir: str, save_folder: str, max_traces: int | None = None):
 
     pool_gen = PoolGenerator(output_schema=output_schema, taxonomy=taxonomy, examples=examples)
     judge_client = get_langfuse_judge_client()
-    setup_langfuse_instrumentation()
 
     data_dir = Path(data_dir)
     cleaned_dir = data_dir / "cleaned"
@@ -370,7 +374,7 @@ async def main(data_dir: str, save_folder: str, max_traces: int | None = None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate WebArena with AutoJudge")
-    parser.add_argument("--data-dir", default="examples/agent-reward-bench/data/test", help="Path to base data directory containing cleaned/ and pruned/ folders")
+    parser.add_argument("--data-dir", default="examples/agent-reward-bench/data", help="Path to base data directory containing cleaned/ and pruned/ folders")
     parser.add_argument("--save-folder", default="webarena_results", help="Output folder name")
     parser.add_argument("--max-traces", type=int, default=None, help="Max traces to evaluate")
     parser.add_argument("--test", action="store_true", help="Test mode: run on 5 traces")
