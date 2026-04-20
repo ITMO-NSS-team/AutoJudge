@@ -154,11 +154,11 @@ async def create_pool_with_retries(pool_gen, judge_input: dict, max_attempts: in
                 )
             else:
                 context_feedback = f"Previous attempt failed with error: {str(exc)[:200]}. Fix the schema."
-            
+
             error_val = f"attempt {attempt}/{max_attempts}: {type(exc).__name__}: {str(exc)[:300]}"
             attempt_errors.append(error_val)
-            logger.warning(f"Pool creation attempt {attempt} failed: {exc}")
-            
+            logger.warning(f"Pool creation attempt {attempt} failed:", exc_info=True)
+
     error_block = "\n".join(f"- {e}" for e in attempt_errors)
     raise RuntimeError(f"Failed to create pool after {max_attempts} attempts. Errors:\n{error_block}")
 
@@ -370,7 +370,7 @@ async def main(data_dir: str, save_folder: str, max_traces: int | None = None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate WebArena with AutoJudge")
-    parser.add_argument("--data-dir", default="examples/agent-reward-bench/data", help="Path to base data directory containing cleaned/ and pruned/ folders")
+    parser.add_argument("--data-dir", default="examples/agent-reward-bench/data/test", help="Path to base data directory containing cleaned/ and pruned/ folders")
     parser.add_argument("--save-folder", default="webarena_results", help="Output folder name")
     parser.add_argument("--max-traces", type=int, default=None, help="Max traces to evaluate")
     parser.add_argument("--test", action="store_true", help="Test mode: run on 5 traces")
