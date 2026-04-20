@@ -39,11 +39,20 @@ Task Categories:
 2. Site Navigation: Agent must navigate to reach specific pages or states
 3. Content Modification: Agent must modify webpage content or settings
 
+Evaluation Process - Analyze Action Sequence:
+Review the step-by-step action history (e.g., click, fill, scroll, type). Each action represents:
+- click(element_id) - Click interaction
+- fill(element_id, text) - Form input
+- scroll(direction) - Page scrolling
+- type(text) - Text input
+- etc.
+
 Evaluation Criteria:
-- Consider action sufficiency: Did the agent perform all necessary steps properly?
-- For Information Seeking: Does the response contain requested information or state unavailability?
-- For Navigation: Check if agent reached the target page/state via appropriate actions
-- For Modification: Verify final state matches requirements through action history
+- Action Sufficiency: Did agent take ALL necessary steps in logical order?
+- For Information Seeking: Response must contain requested information + actions show proper search/navigation
+- For Navigation: Agent reached target page/state through correct action sequence
+- For Modification: Action sequence shows content was actually changed (verified by final state)
+- Procedural Completeness: No shortcuts that skip required steps (e.g., must sort before selecting "top items")
 """
 
 output_schema = """
@@ -56,40 +65,157 @@ Return ONLY valid JSON (no markdown, no extra text):
 Note: Status must be exactly "success" or "failure".
 """
 
+
 examples = """
-Example 1 - Complete Success:
-Goal: Search for a product on amazon.com and add it to cart
-Trajectory: User navigates to amazon.com, uses search bar to find product, views details, adds to cart successfully with no errors or loops.
+Example 1 - MAS Task Completion Evaluation:
+[
+  {
+    "name": "MAS_TASK_COMPLETION_JUDGE",
+    "instructions": "**Instruction**:
+Evaluate whether the multi-agent system fully completed the user's task by assessing end-to-end outcome across all agents.
 
-Expected output:
-{
-  "success": {"answer": "yes", "reasoning": "Agent navigated to correct site, searched for product, and successfully added to cart"},
-  "side_effect": {"answer": "no", "reasoning": "All actions were necessary for the goal; no unnecessary clicks or modifications"},
-  "repetition_cycle": {"answer": "no", "reasoning": "Agent followed a logical path without repeating actions or getting stuck in loops"}
-}
+**Evaluation Criteria**:
+1. *Task Relevance* - Does output address the main objective?
+2. *Completeness* - Are all required subtasks/steps present?
+3. *Consistency* - Are agent outputs logically coherent without contradictions?
+4. *Actionability* - Can the user act on outputs to achieve their goal?
+5. *Efficiency* - Were tasks completed without unnecessary duplication?
 
-Example 2 - Partial Success with Side Effects:
-Goal: Book a hotel reservation
-Trajectory: Agent navigates to hotel website, searches for hotels, starts booking process, but agent clicks on advertisement links by mistake and visits unrelated pages before completing the booking.
+**Scoring**:
+- \"ideal\": Task fully achieved, all subtasks addressed, outputs consistent and actionable
+- \"fair\": Task largely achieved but minor omissions or slight inconsistencies
+- \"poor\": Task failed, critical steps missing, inconsistent or unusable outputs
 
-Expected output:
-{
-  "success": {"answer": "no", "reasoning": "Agent did not complete the booking - process was interrupted before payment"},
-  "side_effect": {"answer": "yes", "reasoning": "Agent clicked on advertisement links which were not necessary for the goal"},
-  "repetition_cycle": {"answer": "no", "reasoning": "No repetitive loops detected; actions were varied though misdirected"}
-}
+Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "mcp_tools": []
+  }
+]
 
-Example 3 - Loop Detection:
-Goal: Add an item to shopping cart
-Trajectory: Agent searches for item, clicks product, adds to cart, then repeatedly checks cart, removes item, re-adds item, checks again in a cycle that doesn't progress toward the goal.
+Example 2 - MAS Complexity Assessment:
+[
+  {
+    "name": "MAS_COMPLEXITY_JUDGE",
+    "instructions": "**Instruction**:
+Evaluate complexity and interconnectedness of the multi-agent system.
 
-Expected output:
-{
-  "success": {"answer": "no", "reasoning": "Agent never completed the final goal due to continuous loop of adding/removing"},
-  "side_effect": {"answer": "no", "reasoning": "All actions relate to the cart; no extraneous side effects to other pages"},
-  "repetition_cycle": {"answer": "yes", "reasoning": "Agent clearly loops through add->check->remove->add cycle without progressing"}
-}
-"""
+**Evaluation Criteria**:
+1. *Agent Density* - Is number of agents appropriate for system scope?
+2. *Interconnection Quality* - Are agent connections well-designed and efficient?
+3. *System Scalability* - Can architecture accommodate growth and maintainability?
+
+**Scoring**:
+- \"ideal\": Complexity perfectly balanced with optimal density and connections
+- \"fair\": Complexity manageable but has scalability or efficiency issues
+- \"poor\": Complexity poorly managed with density or connection problems
+
+Return single JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "mcp_tools": []
+  }
+]
+
+Example 3 - Tool Performance Evaluation:
+[
+  {
+    "name": "TOOL_PERFORMANCE_JUDGE",
+    "instructions": "**Instruction**:
+Assess whether tools successfully fulfilled user requests by evaluating execution outcome quality.
+
+**Evaluation Criteria**:
+1. *Task Completion* - Did tool fully accomplish the request?
+2. *Accuracy* - Is output accurate, relevant, and logically consistent?
+3. *Clarity* - Is output clear, structured, and in expected format?
+4. *Failure Handling* - Any errors or unrelated information returned?
+
+**Scoring** (strict - zero tolerance for errors):
+- \"ideal\": Output perfectly solves task, all parts correct and complete
+- \"fair\": Output mostly correct but minor issues or omissions
+- \"poor\": Output fails task, incorrect, incomplete, or misleading
+
+Return JSON list: [{\"state_id\": \"...\", \"justification\": \"...\", \"score\": \"ideal|fair|poor\"}]",
+    "mcp_tools": []
+  }
+]
+
+Example 4 - Environment Setup Error Detection:
+[
+  {
+    "name": "MAS_ENVIRONMENT_SETUP_JUDGE",
+    "instructions": "**Instruction**:
+Analyze execution trace to identify environment setup and configuration errors that occurred BEFORE or DURING initialization.
+
+**Scope**: Focus on initialization phase errors, NOT runtime API errors.
+
+**Evaluation Criteria** - Look for trace entries showing:
+1. *File System Issues* - Permission denied, access errors (PermissionError, errno 13)
+2. *Credential Problems* - Missing API keys in config (KeyError: 'API_KEY')
+3. *Environment Variables* - Missing or invalid env vars (os.environ KeyError)
+4. *Config Files* - Missing or malformed configs (FileNotFoundError, JSONDecodeError)
+5. *Dependencies* - Import errors or version conflicts (ModuleNotFoundError)
+You must use the available tools at least once!
+
+**Out of Scope**: HTTP status codes (401, 403, 429, 500), runtime API errors, network timeouts
+
+**Scoring**:
+- \"ideal\": No setup errors, clean initialization
+- \"fair\": Minor warnings but system recovered with defaults
+- \"poor\": Critical setup errors prevented system startup
+
+Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "mcp_tools": []
+  }
+]
+
+Example 5 - API Issues Detection:
+[
+  {
+    "name": "MAS_API_ISSUES_JUDGE",
+    "instructions": "**Instruction**:
+Analyze execution trace to identify API-related errors during RUNTIME execution.
+
+**Scope**: Focus on runtime API communication errors, NOT initialization/config errors.
+You must use the available tools at least once!
+
+**Evaluation Criteria** - Look for trace entries showing:
+1. *Rate Limiting* - HTTP 429, "Rate limit exceeded" (RateLimitError)
+2. *Auth Errors* - HTTP 401/403 during API calls, "Invalid token" (AuthenticationError)
+3. *Server Errors* - HTTP 500/502/503/504, "Internal Server Error"
+4. *Not Found* - HTTP 404, "Endpoint not found"
+5. *Client Errors* - HTTP 400/422, "Bad Request", "Validation failed"
+6. *Network Failures* - Connection timeout, "Connection refused" (ConnectionError)
+
+**Out of Scope**: Environment variable errors, config file issues, local file permissions
+
+**Scoring**:
+- \"ideal\": No API errors, all external calls succeeded
+- \"fair\": Minor/temporary API errors but system recovered
+- \"poor\": Critical API errors prevented task completion or occurred repeatedly
+
+Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "mcp_tools": []
+  }
+]
+
+Example 6 - Tool Selection Evaluation:
+[
+  {
+    "name": "TOOL_SELECTION_JUDGE",
+    "instructions": "**Instruction**:
+Assess whether tool selections made by the agent are appropriate for the task.
+
+**Evaluation Criteria**:
+1. *Tool Relevance* - Does the selected tool directly address the node_role responsibility?
+2. *Pipeline Position* - Is the tool suitable given the agent's position in the pipeline?
+3. *Justification* - Is the tool selection clearly supported by the task requirements?
+
+**Scoring**:
+- \"ideal\": Tool selection perfectly matches node_role and is clearly justified
+- \"fair\": Selection is relevant but potentially suboptimal for the task
+- \"poor\": Selection is inappropriate or clearly mismatched to node_role
+
+Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "mcp_tools": []
+  }
+]"""
 
 
 def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
