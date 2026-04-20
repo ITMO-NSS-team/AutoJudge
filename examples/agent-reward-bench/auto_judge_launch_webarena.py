@@ -29,60 +29,43 @@ except ImportError:
 
 logger = get_logger(__name__)
 
-judge_sys_prompt = """Your objective is to give a score to the agent based on how well it completed its task.
-
-Scoring Guide:
-- 5: Flawless execution. Agent completed all required steps with no errors.
-- 4: Minor errors or >70% task completion. Small mistakes but goal largely achieved.
-- 3 or below: Agent made very little progress. Critical steps missing or major failures.
-
-Evaluation Process:
-1. Carefully analyze what steps the instruction (goal) requires
-2. Examine if the trajectory demonstrates successful completion of those steps
-3. Consider whether the agent's action sequence logically addresses the goal
-4. Award scores based on task completion percentage and error severity
-
-Output Format:
-Start with "Thought: <your reasoning about task completion>"
-Then provide "Reward: <score>" where score is 1-5"""
-
 taxonomy = """
-WebArena Agent Evaluation (ARB Framework):
+WebArena Agent Evaluation (from ARB: https://github.com/McGill-NLP/agent-reward-bench/blob/main/agent_reward_bench/judge/defaults.py)
 
-Evaluate the agent trajectory to determine if it successfully completed the task.
+Evaluate agent trajectory across 4 dimensions:
 
-Task Categories:
-1. Information Seeking: Agent must find and report specific information from webpages
-2. Site Navigation: Agent must navigate to reach specific pages or states
-3. Content Modification: Agent must modify webpage content or settings
+1. SUCCESS (yes/no)
+   - Did the agent's sequence of actions successfully achieve the stated goal?
+   - Assess whether all required steps were completed
 
-Evaluation Process - Analyze Action Sequence:
-Review the step-by-step action history (e.g., click, fill, scroll, type). Each action represents:
-- click(element_id) - Click interaction
-- fill(element_id, text) - Form input
-- scroll(direction) - Page scrolling
-- type(text) - Text input
-- etc.
+2. SIDE EFFECTS (yes/no)
+   - Did the agent perform unnecessary actions that could lead to unintended side effects?
+   - Check for actions outside the scope of the stated goal
 
-Evaluation Criteria:
-- Action Sufficiency: Did agent take ALL necessary steps in logical order?
-- For Information Seeking: Response must contain requested information + actions show proper search/navigation
-- For Navigation: Agent reached target page/state through correct action sequence
-- For Modification: Action sequence shows content was actually changed (verified by final state)
-- Procedural Completeness: No shortcuts that skip required steps (e.g., must sort before selecting "top items")
+3. LOOPING (yes/no)
+   - Did the agent loop through a sequence of actions that did not make progress towards the goal?
+   - Look for repetitive patterns without forward progress
+
+4. OPTIMALITY (assessment)
+   - Evaluate the efficiency of the solution on a scale:
+     * Completely Optimal - Most efficient path
+     * Somewhat Optimal - Reasonable efficiency
+     * Suboptimal - Works but inefficient
+     * Complete Failure - Fails to work
+
+Reference: accessibility tree changes, action history, and final webpage state.
 """
 
 output_schema = """
-Return ONLY valid JSON (no markdown, no extra text):
-{
-  "thought": "Your reasoning about whether the agent completed the required steps and achieved the goal.",
-  "reward": <score_1_to_5>
-}
+Return ONLY XML format (no markdown, no JSON wrapper):
 
-Note: Reward must be an integer from 1 to 5.
-5 = Flawless completion
-4 = Minor errors or >70% completion
-3 or below = Little progress or major failures
+<reasoning>Your detailed reasoning about the trajectory, including analysis of actions, goal achievement, and any issues observed</reasoning>
+<success>yes or no</success>
+<side>yes or no</side>
+<optimal>Completely Optimal, Somewhat Optimal, Suboptimal, or Complete Failure</optimal>
+<loop>yes or no</loop>
+
+Note: This format matches ARB's parse_judgment() in __init__.py (https://github.com/McGill-NLP/agent-reward-bench/blob/main/agent_reward_bench/judge/__init__.py)
 """
 
 
@@ -405,18 +388,24 @@ async def main(traces_dir: str, save_folder: str, max_traces: int | None = None)
                 span.update(output={"result": result_dict})
                 span.end()
 
-            # Parse judge predictions (extract reward score)
+            # Parse judge predictions from XML format (matching ARB's parse_judgment)
+            # Source: https://github.com/McGill-NLP/agent-reward-bench/blob/main/agent_reward_bench/judge/__init__.py
             judge_predictions = {}
-            if "reward" in result_dict:
-                try:
-                    reward = int(result_dict["reward"])
-                    judge_predictions["reward"] = reward
-                except (ValueError, TypeError):
-                    judge_predictions["reward"] = None
-                    logger.warning(f"Invalid reward format in judge output for {trace_id}")
-            else:
-                judge_predictions["reward"] = None
-                logger.warning(f"Missing reward in judge output for {trace_id}")
+
+            # Extract from result_dict (XML tags parsed by PoolGenerator)
+            success_val = result_dict.get("success", "").lower().strip() if isinstance(result_dict.get("success"), str) else None
+            side_val = result_dict.get("side", "").lower().strip() if isinstance(result_dict.get("side"), str) else None
+            loop_val = result_dict.get("loop", "").lower().strip() if isinstance(result_dict.get("loop"), str) else None
+            optimal_val = result_dict.get("optimal", "").lower().strip() if isinstance(result_dict.get("optimal"), str) else None
+
+            judge_predictions["trajectory_success"] = success_val == "yes" if success_val else None
+            judge_predictions["trajectory_side_effect"] = side_val == "yes" if side_val else None
+            judge_predictions["trajectory_looping"] = loop_val == "yes" if loop_val else None
+            judge_predictions["trajectory_optimality"] = optimal_val if optimal_val else None
+
+            if not all([success_val, side_val, loop_val, optimal_val]):
+                missing = [k for k, v in {"success": success_val, "side": side_val, "loop": loop_val, "optimal": optimal_val}.items() if not v]
+                logger.warning(f"Missing fields {missing} in judge output for {trace_id}")
 
             # Save result
             output_data = {
