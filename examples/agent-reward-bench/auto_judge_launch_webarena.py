@@ -29,9 +29,8 @@ except ImportError:
 
 logger = get_logger(__name__)
 
+# WebArena Agent Evaluation (from ARB: https://github.com/McGill-NLP/agent-reward-bench/blob/main/agent_reward_bench/judge/defaults.py)
 taxonomy = """
-WebArena Agent Evaluation (from ARB: https://github.com/McGill-NLP/agent-reward-bench/blob/main/agent_reward_bench/judge/defaults.py)
-
 Evaluate agent trajectory across 4 dimensions:
 
 1. SUCCESS (yes/no)
@@ -57,15 +56,18 @@ Reference: accessibility tree changes, action history, and final webpage state.
 """
 
 output_schema = """
-Return ONLY XML format (no markdown, no JSON wrapper):
+Return ONLY valid JSON (no markdown, no extra text):
 
-<reasoning>Your detailed reasoning about the trajectory, including analysis of actions, goal achievement, and any issues observed</reasoning>
-<success>yes or no</success>
-<side>yes or no</side>
-<optimal>Completely Optimal, Somewhat Optimal, Suboptimal, or Complete Failure</optimal>
-<loop>yes or no</loop>
+{
+  "reasoning": "Your detailed reasoning about the trajectory, including analysis of actions, goal achievement, and any issues observed",
+  "success": "yes or no",
+  "side": "yes or no",
+  "optimal": "Completely Optimal, Somewhat Optimal, Suboptimal, or Complete Failure",
+  "loop": "yes or no"
+}
 
-Note: This format matches ARB's parse_judgment() in __init__.py (https://github.com/McGill-NLP/agent-reward-bench/blob/main/agent_reward_bench/judge/__init__.py)
+Note: Fields will be parsed and mapped to trajectory_success, trajectory_side_effect, trajectory_optimality, trajectory_looping for ARB scoring
+Source: https://github.com/McGill-NLP/agent-reward-bench/blob/main/scripts/score_judgments.py
 """
 
 
