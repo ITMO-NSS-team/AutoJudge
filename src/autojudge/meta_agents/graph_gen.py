@@ -8,8 +8,7 @@ from autojudge.utils.logger import get_logger
 from .base import BaseMetaAgent
 from .prompts import DEFAULT_GRAPH_INSTRUCT
 
-if TYPE_CHECKING:
-    from autojudge.agent_pool import AgentPool
+from autojudge.agent_pool import AgentPool
 
 logger = get_logger()
 
