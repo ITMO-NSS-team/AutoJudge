@@ -65,9 +65,6 @@ Return ONLY valid JSON (no markdown, no extra text):
   "optimal": "Completely Optimal, Somewhat Optimal, Suboptimal, or Complete Failure",
   "loop": "yes or no"
 }
-
-Note: Fields will be parsed and mapped to trajectory_success, trajectory_side_effect, trajectory_optimality, trajectory_looping for ARB scoring
-Source: https://github.com/McGill-NLP/agent-reward-bench/blob/main/scripts/score_judgments.py
 """
 
 
