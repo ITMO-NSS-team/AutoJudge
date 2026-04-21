@@ -32,6 +32,9 @@ def load_arb_ground_truth(annotations_file: str) -> dict:
         return {}
 
 def calculate_binary_metrics(predictions: list[bool], ground_truth: list[bool]) -> dict:
+    """Calculate ARB metrics. For reference, see:
+    https://github.com/McGill-NLP/agent-reward-bench/blob/main/scripts/score_judgments.py
+    """
     if len(predictions) != len(ground_truth):
         raise ValueError("Predictions and ground truth must have same length")
 

@@ -6,7 +6,10 @@ import re
 import sys
 from pathlib import Path
 
+# Add src to path for automas
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
+# Add project root to path for maseval
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from dotenv import load_dotenv
 
@@ -699,7 +702,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # folder for output
-    folder = "aegis_eval_no_summaries_test" if args.test else "aegis_eval_no_summaries"
+    folder = "aegis_eval_no_summaries_test" if args.test else "aegis_eval_no_summaries_lfcheck"
     
     max_traces = 5 if args.test else None
 

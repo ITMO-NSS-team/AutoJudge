@@ -6,7 +6,10 @@ import os
 import sys
 from pathlib import Path
 
+# Add src to path for automas
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
+# Add project root to path for maseval
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from dotenv import load_dotenv
 
@@ -19,48 +22,37 @@ from automas.pipeline.types import GraphDict
 from automas.pipeline import PipelineBuilder
 from automas.utils import get_logger
 
-try:
-    from maseval import get_langfuse_judge_client
-except ImportError:
-    def get_langfuse_judge_client():
-        return None
+from maseval import get_langfuse_judge_client
 
 logger = get_logger(__name__)
 
 taxonomy = """
-Evaluate agent trajectory across 4 dimensions:
+You are a Language Model specialized in judging the performance of web agents in web navigation tasks. For a certain website, you are given the goal of a navigation task, the current URL of the webpage, the actions taken by the agent, and the thought process of the agent. Additionally, you will have access to the first and last screenshot, as well as the last accessibility tree. Your task is to answer several questions about the agent's performance in the task.
 
-1. SUCCESS (yes/no)
-   - Did the agent's sequence of actions successfully achieve the stated goal?
-   - Assess whether all required steps were completed
+Question 1: Did the agent loop through a sequence of actions that did not make progress towards the goal?
+Choices: Yes, No
 
-2. SIDE EFFECTS (yes/no)
-   - Did the agent perform unnecessary actions that could lead to unintended side effects?
-   - Check for actions outside the scope of the stated goal
+Question 2: Did the agent perform unnecessary actions that could lead to unintended side effects?
+Choices: Yes, No
 
-3. LOOPING (yes/no)
-   - Did the agent loop through a sequence of actions that did not make progress towards the goal?
-   - Look for repetitive patterns without forward progress
+Question 3: Did the agent perform the task optimally, by only performing necessary actions and avoiding unnecessary ones?
+Choices: 1. Complete Failure, 2. Suboptimal, 3. Somewhat Optimal, 4. Completely Optimal
 
-4. OPTIMALITY (assessment)
-   - Evaluate the efficiency of the solution on a scale:
-     * Completely Optimal - Most efficient path
-     * Somewhat Optimal - Reasonable efficiency
-     * Suboptimal - Works but inefficient
-     * Complete Failure - Fails to work
+Question 4: Was the sequence of actions below successful in achieving the goal? 
+Choices: Successful, Unsuccessful
 
-Reference: accessibility tree changes, action history, and final webpage state.
+You should provide your reasoning process for each question, and you can refer to the screenshots and the accessibility tree to support your answers.
 """
 
 output_schema = """
 Return ONLY valid JSON (no markdown, no extra text):
 
 {
-  "reasoning": "Your detailed reasoning about the trajectory, including analysis of actions, goal achievement, and any issues observed",
-  "success": "yes or no",
-  "side": "yes or no",
-  "optimal": "Completely Optimal, Somewhat Optimal, Suboptimal, or Complete Failure",
-  "loop": "yes or no"
+  "reasoning": "your reasoning here",
+  "loop": "Yes or No",
+  "side": "Yes or No",
+  "optimal": "1. Complete Failure, 2. Suboptimal, 3. Somewhat Optimal, or 4. Completely Optimal",
+  "success": "Successful or Unsuccessful"
 }
 """
 
@@ -70,7 +62,22 @@ Example 1 - MAS Task Completion Evaluation:
 [
   {
     "name": "MAS_TASK_COMPLETION_JUDGE",
-    "instructions": "**Instruction**:\nEvaluate whether the multi-agent system fully completed the user's task by assessing end-to-end outcome across all agents.\n\n**Evaluation Criteria**:\n1. *Task Relevance* - Does output address the main objective?\n2. *Completeness* - Are all required subtasks/steps present?\n3. *Consistency* - Are agent outputs logically coherent without contradictions?\n4. *Actionability* - Can the user act on outputs to achieve their goal?\n5. *Efficiency* - Were tasks completed without unnecessary duplication?\n\n**Scoring**:\n- \"ideal\": Task fully achieved, all subtasks addressed, outputs consistent and actionable\n- \"fair\": Task largely achieved but minor omissions or slight inconsistencies\n- \"poor\": Task failed, critical steps missing, inconsistent or unusable outputs\n\nReturn JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "instructions": "**Instruction**:
+Evaluate whether the multi-agent system fully completed the user's task by assessing end-to-end outcome across all agents.
+
+**Evaluation Criteria**:
+1. *Task Relevance* - Does output address the main objective?
+2. *Completeness* - Are all required subtasks/steps present?
+3. *Consistency* - Are agent outputs logically coherent without contradictions?
+4. *Actionability* - Can the user act on outputs to achieve their goal?
+5. *Efficiency* - Were tasks completed without unnecessary duplication?
+
+**Scoring**:
+- \"ideal\": Task fully achieved, all subtasks addressed, outputs consistent and actionable
+- \"fair\": Task largely achieved but minor omissions or slight inconsistencies
+- \"poor\": Task failed, critical steps missing, inconsistent or unusable outputs
+
+Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
     "mcp_tools": []
   }
 ]
@@ -79,7 +86,20 @@ Example 2 - MAS Complexity Assessment:
 [
   {
     "name": "MAS_COMPLEXITY_JUDGE",
-    "instructions": "**Instruction**:\nEvaluate complexity and interconnectedness of the multi-agent system.\n\n**Evaluation Criteria**:\n1. *Agent Density* - Is number of agents appropriate for system scope?\n2. *Interconnection Quality* - Are agent connections well-designed and efficient?\n3. *System Scalability* - Can architecture accommodate growth and maintainability?\n\n**Scoring**:\n- \"ideal\": Complexity perfectly balanced with optimal density and connections\n- \"fair\": Complexity manageable but has scalability or efficiency issues\n- \"poor\": Complexity poorly managed with density or connection problems\n\nReturn single JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "instructions": "**Instruction**:
+Evaluate complexity and interconnectedness of the multi-agent system.
+
+**Evaluation Criteria**:
+1. *Agent Density* - Is number of agents appropriate for system scope?
+2. *Interconnection Quality* - Are agent connections well-designed and efficient?
+3. *System Scalability* - Can architecture accommodate growth and maintainability?
+
+**Scoring**:
+- \"ideal\": Complexity perfectly balanced with optimal density and connections
+- \"fair\": Complexity manageable but has scalability or efficiency issues
+- \"poor\": Complexity poorly managed with density or connection problems
+
+Return single JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
     "mcp_tools": []
   }
 ]
@@ -88,7 +108,21 @@ Example 3 - Tool Performance Evaluation:
 [
   {
     "name": "TOOL_PERFORMANCE_JUDGE",
-    "instructions": "**Instruction**:\nAssess whether tools successfully fulfilled user requests by evaluating execution outcome quality.\n\n**Evaluation Criteria**:\n1. *Task Completion* - Did tool fully accomplish the request?\n2. *Accuracy* - Is output accurate, relevant, and logically consistent?\n3. *Clarity* - Is output clear, structured, and in expected format?\n4. *Failure Handling* - Any errors or unrelated information returned?\n\n**Scoring** (strict - zero tolerance for errors):\n- \"ideal\": Output perfectly solves task, all parts correct and complete\n- \"fair\": Output mostly correct but minor issues or omissions\n- \"poor\": Output fails task, incorrect, incomplete, or misleading\n\nReturn JSON list: [{\"state_id\": \"...\", \"justification\": \"...\", \"score\": \"ideal|fair|poor\"}]",
+    "instructions": "**Instruction**:
+Assess whether tools successfully fulfilled user requests by evaluating execution outcome quality.
+
+**Evaluation Criteria**:
+1. *Task Completion* - Did tool fully accomplish the request?
+2. *Accuracy* - Is output accurate, relevant, and logically consistent?
+3. *Clarity* - Is output clear, structured, and in expected format?
+4. *Failure Handling* - Any errors or unrelated information returned?
+
+**Scoring** (strict - zero tolerance for errors):
+- \"ideal\": Output perfectly solves task, all parts correct and complete
+- \"fair\": Output mostly correct but minor issues or omissions
+- \"poor\": Output fails task, incorrect, incomplete, or misleading
+
+Return JSON list: [{\"state_id\": \"...\", \"justification\": \"...\", \"score\": \"ideal|fair|poor\"}]",
     "mcp_tools": []
   }
 ]
@@ -97,7 +131,27 @@ Example 4 - Environment Setup Error Detection:
 [
   {
     "name": "MAS_ENVIRONMENT_SETUP_JUDGE",
-    "instructions": "**Instruction**:\nAnalyze execution trace to identify environment setup and configuration errors that occurred BEFORE or DURING initialization.\n\n**Scope**: Focus on initialization phase errors, NOT runtime API errors.\n\n**Evaluation Criteria** - Look for trace entries showing:\n1. *File System Issues* - Permission denied, access errors (PermissionError, errno 13)\n2. *Credential Problems* - Missing API keys in config (KeyError: 'API_KEY')\n3. *Environment Variables* - Missing or invalid env vars (os.environ KeyError)\n4. *Config Files* - Missing or malformed configs (FileNotFoundError, JSONDecodeError)\n5. *Dependencies* - Import errors or version conflicts (ModuleNotFoundError)\nYou must use the available tools at least once!\n\n**Out of Scope**: HTTP status codes (401, 403, 429, 500), runtime API errors, network timeouts\n\n**Scoring**:\n- \"ideal\": No setup errors, clean initialization\n- \"fair\": Minor warnings but system recovered with defaults\n- \"poor\": Critical setup errors prevented system startup\n\nReturn JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "instructions": "**Instruction**:
+Analyze execution trace to identify environment setup and configuration errors that occurred BEFORE or DURING initialization.
+
+**Scope**: Focus on initialization phase errors, NOT runtime API errors.
+
+**Evaluation Criteria** - Look for trace entries showing:
+1. *File System Issues* - Permission denied, access errors (PermissionError, errno 13)
+2. *Credential Problems* - Missing API keys in config (KeyError: 'API_KEY')
+3. *Environment Variables* - Missing or invalid env vars (os.environ KeyError)
+4. *Config Files* - Missing or malformed configs (FileNotFoundError, JSONDecodeError)
+5. *Dependencies* - Import errors or version conflicts (ModuleNotFoundError)
+You must use the available tools at least once!
+
+**Out of Scope**: HTTP status codes (401, 403, 429, 500), runtime API errors, network timeouts
+
+**Scoring**:
+- \"ideal\": No setup errors, clean initialization
+- \"fair\": Minor warnings but system recovered with defaults
+- \"poor\": Critical setup errors prevented system startup
+
+Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
     "mcp_tools": []
   }
 ]
@@ -106,7 +160,28 @@ Example 5 - API Issues Detection:
 [
   {
     "name": "MAS_API_ISSUES_JUDGE",
-    "instructions": "**Instruction**:\nAnalyze execution trace to identify API-related errors during RUNTIME execution.\n\n**Scope**: Focus on runtime API communication errors, NOT initialization/config errors.\nYou must use the available tools at least once!\n\n**Evaluation Criteria** - Look for trace entries showing:\n1. *Rate Limiting* - HTTP 429, "Rate limit exceeded" (RateLimitError)\n2. *Auth Errors* - HTTP 401/403 during API calls, "Invalid token" (AuthenticationError)\n3. *Server Errors* - HTTP 500/502/503/504, "Internal Server Error"\n4. *Not Found* - HTTP 404, "Endpoint not found"\n5. *Client Errors* - HTTP 400/422, "Bad Request", "Validation failed"\n6. *Network Failures* - Connection timeout, "Connection refused" (ConnectionError)\n\n**Out of Scope**: Environment variable errors, config file issues, local file permissions\n\n**Scoring**:\n- \"ideal\": No API errors, all external calls succeeded\n- \"fair\": Minor/temporary API errors but system recovered\n- \"poor\": Critical API errors prevented task completion or occurred repeatedly\n\nReturn JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "instructions": "**Instruction**:
+Analyze execution trace to identify API-related errors during RUNTIME execution.
+
+**Scope**: Focus on runtime API communication errors, NOT initialization/config errors.
+You must use the available tools at least once!
+
+**Evaluation Criteria** - Look for trace entries showing:
+1. *Rate Limiting* - HTTP 429, "Rate limit exceeded" (RateLimitError)
+2. *Auth Errors* - HTTP 401/403 during API calls, "Invalid token" (AuthenticationError)
+3. *Server Errors* - HTTP 500/502/503/504, "Internal Server Error"
+4. *Not Found* - HTTP 404, "Endpoint not found"
+5. *Client Errors* - HTTP 400/422, "Bad Request", "Validation failed"
+6. *Network Failures* - Connection timeout, "Connection refused" (ConnectionError)
+
+**Out of Scope**: Environment variable errors, config file issues, local file permissions
+
+**Scoring**:
+- \"ideal\": No API errors, all external calls succeeded
+- \"fair\": Minor/temporary API errors but system recovered
+- \"poor\": Critical API errors prevented task completion or occurred repeatedly
+
+Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
     "mcp_tools": []
   }
 ]
@@ -115,11 +190,23 @@ Example 6 - Tool Selection Evaluation:
 [
   {
     "name": "TOOL_SELECTION_JUDGE",
-    "instructions": "**Instruction**:\nAssess whether tool selections made by the agent are appropriate for the task.\n\n**Evaluation Criteria**:\n1. *Tool Relevance* - Does the selected tool directly address the node_role responsibility?\n2. *Pipeline Position* - Is the tool suitable given the agent's position in the pipeline?\n3. *Justification* - Is the tool selection clearly supported by the task requirements?\n\n**Scoring**:\n- \"ideal\": Tool selection perfectly matches node_role and is clearly justified\n- \"fair\": Selection is relevant but potentially suboptimal for the task\n- \"poor\": Selection is inappropriate or clearly mismatched to node_role\n\nReturn JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
+    "instructions": "**Instruction**:
+Assess whether tool selections made by the agent are appropriate for the task.
+
+**Evaluation Criteria**:
+1. *Tool Relevance* - Does the selected tool directly address the node_role responsibility?
+2. *Pipeline Position* - Is the tool suitable given the agent's position in the pipeline?
+3. *Justification* - Is the tool selection clearly supported by the task requirements?
+
+**Scoring**:
+- \"ideal\": Tool selection perfectly matches node_role and is clearly justified
+- \"fair\": Selection is relevant but potentially suboptimal for the task
+- \"poor\": Selection is inappropriate or clearly mismatched to node_role
+
+Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
     "mcp_tools": []
   }
 ]"""
-
 
 def has_final_aggregator(pool) -> bool:
     return any(agent.get("name") == "FINAL_AGGREGATOR" if isinstance(agent, dict) else agent.name == "FINAL_AGGREGATOR" for agent in pool.full_agents_data)
@@ -218,40 +305,43 @@ async def evaluate_trace(trace_id: str, trace_data: dict, pool_gen, judge_client
     # Execute with Langfuse tracing (if available)
     trace_id_lf = ""
     raw_result = None
-    t = None
-    
-    if judge_client:
-        # Create a trace specifically in the judge project
-        with judge_client.trace(
-            name=f"evaluate_webarena_{trace_id}",
-            tags=["webarena", "arb", "autojudge", f"task_id:{trace_id}"],
-            metadata={"task_id": trace_id, "benchmark": "webarena"}
-        ) as t:
-            trace_id_lf = t.id
-            raw_result = await pipeline.ainvoke(judge_input)
-    else:
+    span = None
+
+    import contextlib
+    ctx_mgr = judge_client.start_as_current_span(
+        name=f"evaluate_webarena_{trace_id}",
+        input={"task_id": trace_id},
+        metadata={"task_id": trace_id, "benchmark": "webarena"}
+    ) if judge_client else contextlib.nullcontext()
+
+    with ctx_mgr as span:
+        if judge_client:
+            judge_client.update_current_trace(tags=["webarena", "arb", "autojudge", f"task_id:{trace_id}"])
+
         raw_result = await pipeline.ainvoke(judge_input)
 
-    result = raw_result.get("response") if isinstance(raw_result, dict) else raw_result
+        result = raw_result.get("response") if isinstance(raw_result, dict) else raw_result
 
-    # Clean JSON output
-    clean = result.strip()
-    if clean.startswith("```json"):
-        clean = clean[7:]
-    if clean.startswith("```"):
-        clean = clean[3:]
-    if clean.endswith("```"):
-        clean = clean[:-3]
-    clean = clean.strip()
+        # Clean JSON output
+        clean = result.strip()
+        if clean.startswith("```json"):
+            clean = clean[7:]
+        if clean.startswith("```"):
+            clean = clean[3:]
+        if clean.endswith("```"):
+            clean = clean[:-3]
+        clean = clean.strip()
 
-    try:
-        result_dict = json.loads(clean)
-    except json.JSONDecodeError:
-        result_dict = {"raw": result}
+        try:
+            result_dict = json.loads(clean)
+        except json.JSONDecodeError:
+            result_dict = {"raw": result}
 
-    if t:
-        t.update(output={"result": result_dict})
-        judge_client.flush()
+        if span and hasattr(span, 'update'):
+            span.update(output={"result": result_dict})
+        
+        if judge_client:
+            judge_client.flush()
 
     # Parse judge predictions
     judge_predictions = {}
@@ -260,7 +350,7 @@ async def evaluate_trace(trace_id: str, trace_data: dict, pool_gen, judge_client
     loop_val = result_dict.get("loop", "").lower().strip() if isinstance(result_dict.get("loop"), str) else None
     optimal_val = result_dict.get("optimal", "").lower().strip() if isinstance(result_dict.get("optimal"), str) else None
 
-    judge_predictions["trajectory_success"] = success_val == "yes" if success_val else None
+    judge_predictions["trajectory_success"] = success_val in ["yes", "successful"] if success_val else None
     judge_predictions["trajectory_side_effect"] = side_val == "yes" if side_val else None
     judge_predictions["trajectory_looping"] = loop_val == "yes" if loop_val else None
     judge_predictions["trajectory_optimality"] = optimal_val if optimal_val else None

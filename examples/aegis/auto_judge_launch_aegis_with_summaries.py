@@ -7,6 +7,8 @@ from pathlib import Path
 import asyncio
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
+# Add project root to path for maseval
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from dotenv import load_dotenv
 

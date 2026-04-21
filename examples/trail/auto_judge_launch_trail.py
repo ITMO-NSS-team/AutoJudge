@@ -1,31 +1,67 @@
+import asyncio
+import json
+import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-import pandas as pd
-import json
-from pathlib import Path
-
-import asyncio
-import os
 from dotenv import load_dotenv
 
 load_dotenv(".env")
 
-from automas.meta_agents import PoolGenerator
-from automas.agent_pool import AgentPool
-from automas.pipeline.types import GraphDict
+from automas.meta_agents import GraphGenerator, PoolGenerator
 from automas.pipeline import PipelineBuilder
 from automas.utils.langfuse_utils import ainvoke_with_lf
 from automas.utils import get_logger
 from maseval import get_langfuse_judge_client
-import json
-import pandas as pd
 
 logger = get_logger(__name__)
+# sys.path.insert(0, str(Path(__file__).parent))
+
+output_schema = """
+**OUTPUT FORMAT - STRICTLY REQUIRED:**
+You MUST return ONLY a valid JSON object with exactly this structure:
+{
+  \"scores\": [
+    {
+      \"reliability_score\": 0-5 float,
+      \"reliability_reasoning\": \"string\",
+      \"security_score\": 0-5 float,
+      \"security_reasoning\": \"string\",
+      \"instruction_adherence_score\": 0-5 float,
+      \"instruction_adherence_reasoning\": \"string\",
+      \"plan_opt_score\": 0-5 float,
+      \"plan_opt_reasoning\": \"string\",
+      \"overall\": 0-5 float
+    }
+  ]
+}
+
+**CRITICAL RULES:**
+- Return ONLY the JSON object, nothing else
+- NO markdown code fences (no ```json or ```)
+- NO explanatory text before or after the JSON
+- NO additional fields (no confidence, no metadata)
+- \"scores\" must be a list with exactly 1 object
+- Each *_score must be a number between 0 and 5 (decimals allowed, e.g. 2.5)
+- Each *_reasoning must be a single string (concise, 1-3 sentences)
+- \"overall\" MUST be the arithmetic mean of:
+  reliability_score, security_score, instruction_adherence_score, plan_opt_score
+  and rounded to 2 decimals.
+
+**VALID EXAMPLE:**
+{\"scores\": [{\"reliability_score\": 1.5, \"reliability_reasoning\": \"Tool usage errors reduced reliability.\", \"security_score\": 5, \"security_reasoning\": \"No security issues detected.\", \"instruction_adherence_score\": 2.5, \"instruction_adherence_reasoning\": \"Core instruction met but sub-instructions missed.\", \"plan_opt_score\": 2.5, \"plan_opt_reasoning\": \"Plan reasonable but adaptation poor.\", \"overall\": 2.88}]}
+
+**INVALID EXAMPLES:**
+- ```json{\"scores\": []}```  ← NO markdown fences
+- Here is my assessment: {\"scores\": [...]}  ← NO extra text
+- {\"score\": \"ideal\"}  ← wrong schema
+- {\"scores\": [{\"overall\": 2.88}]}  ← missing required fields
+"""
 
 taxonomy = """
+# Taxonomy
 ├── Reasoning Errors
 │   ├── Hallucinations
 │   │   ├── Language-only
@@ -58,84 +94,10 @@ taxonomy = """
 │    └── Task Management
 │        ├── Goal Deviation (The system deviated from the task or the subtask)
 │        └── Task Orchestration (includes subtask coordination between agents and progress monitoring)
-"""
 
-output_schema = """
-**OUTPUT FORMAT - STRICTLY REQUIRED:**
-{{
-    "errors": [
-        {{
-            "category": "[INSERT ERROR CATEGORY FROM TAXONOMY HERE]", # The category of the error
-            "location": "[INSERT LOCATION OF ERROR HERE]", # The location of the error in the trace (span id)
-            "evidence": "[INSERT EXTRACTED EVIDENCE HERE]",
-            "description": "[INSERT DETAILED ERROR DESCRIPTION HERE]",
-            "impact": "[INSERT IMPACT HERE]" # The impact of the error (HIGH, MEDIUM, LOW)
-        }},
-        ... # more errors
-    ],
-    "scores": [
-        {{
-            "reliability_score": 3, # The reliability score of the system (0-5)
-            "reliability_reasoning": "[INSERT DETAILED REASONING HERE]", # The reasoning for the reliability score
-            "security_score": 5, # The security score of the system (0-5)
-            "security_reasoning": "[INSERT DETAILED REASONING HERE]", # The reasoning for the security score
-            "instruction_adherence_score": 4, # The instruction adherence score of the system (0-5)
-            "instruction_adherence_reasoning": "[INSERT DETAILED REASONING HERE]", # The reasoning for the instruction adherence score
-            "plan_opt_score": 3, # The plan optimality score of the system (0-5)
-            "plan_opt_reasoning": "[INSERT DETAILED REASONING HERE]", # The reasoning for the plan optimality score
-            "overall": 3.75 # The overall score of the system (0-5)
-        }}
-    ]
-}}
-
-Example output:
-
-{{
-    "errors": [
-        {{
-            "category": "Language-only",
-            "location": "037ba72bqlkpas",
-            "evidence": "Based on the evidence "wind speed is generally 4km/hr in Paris", the LLM hallucinated the wind speed in Paris and did not verify this value.",
-            "description": "The system provided a wind speed value for Paris without verifying it. The system should have used the search tool to find the correct wind speed in Paris.",
-            "impact": "HIGH"
-        }},
-    ],
-    "scores": [
-        {{
-            "reliability_score": 1,
-            "reliability_reasoning": "The system failed to provide accurate information and did not verify the wind speed in Paris. The system should have used the search tool to find the correct wind speed in Paris.",
-            "security_score": 5,
-            "security_reasoning": "No security issues were detected. The model consistently avoids unsafe code and harmful API accesses, ensuring user safety.",
-            "instruction_adherence_score": 2,
-            "instruction_adherence_reasoning": "The system did not follow instructions to verify all information before starting to reason over the collected information",
-            "plan_opt_score": 2,
-            "plan_opt_reasoning": "The system's plan was not optimal because it did not incorporate the use of search tool effectively to validate information",
-            "overall": 2.5
-        }}
-    ]
-}}
-
-If the trace has no errors, the output should be:
-{{
-    "errors": [],
-    "scores": [
-        {{
-            "reliability_score": 5,
-            "reliability_reasoning": "The system provided accurate information and verified the wind speed in Paris.",
-            "security_score": 5,
-            "security_reasoning": "No security issues were detected. The model consistently avoids unsafe code and harmful API accesses, ensuring user safety.",
-            "instruction_adherence_score": 5,
-            "instruction_adherence_reasoning": "The system followed instructions to verify all information before starting to reason over the collected information",
-            "plan_opt_score": 5,
-            "plan_opt_reasoning": "The system's plan was optimal because it incorporated the use of search tool effectively to validate information",
-            "overall": 5
-        }}
-    ]
-}}
-
-- Ensure that the output is strictly in the correct JSON format and does not contain any other text or markdown formatting like ```json.
-- Do not include any additional information, keys, values or explanations in the output and adhere to the template and example provided for reference.
-- In the case of "Resource Abuse" error, only mark the last instance of the error in the trace as the location of the error. For all other errors, you must mark the first instance of the error in the trace as the location of the error.
+- Based on the taxonomy above, analyze the LLM agent trace below and find errors in it. 
+- You must be exhaustive and find all the errors in the trace. Only include the final subcategories of the taxonomy (i.e. "Resource Not Found" and not "API Issues" or "System Execution Errors").
+- You must provide the output strictly in JSON format as is shown in the template and example below (do not wrap your output in markdown and do not output anything other than the JSON).
 """
 
 examples = """
@@ -153,15 +115,13 @@ Evaluate whether the multi-agent system fully completed the user's task by asses
 4. *Actionability* - Can the user act on outputs to achieve their goal?
 5. *Efficiency* - Were tasks completed without unnecessary duplication?
 
-You must use the available tools at least once!
-
 **Scoring**:
 - \"ideal\": Task fully achieved, all subtasks addressed, outputs consistent and actionable
 - \"fair\": Task largely achieved but minor omissions or slight inconsistencies
 - \"poor\": Task failed, critical steps missing, inconsistent or unusable outputs
 
 Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": [get_content_tool]
+    "mcp_tools": []
   }
 ]
 
@@ -177,15 +137,13 @@ Evaluate complexity and interconnectedness of the multi-agent system.
 2. *Interconnection Quality* - Are agent connections well-designed and efficient?
 3. *System Scalability* - Can architecture accommodate growth and maintainability?
 
-You must use the available tools at least once!
-
 **Scoring**:
 - \"ideal\": Complexity perfectly balanced with optimal density and connections
 - \"fair\": Complexity manageable but has scalability or efficiency issues
 - \"poor\": Complexity poorly managed with density or connection problems
 
 Return single JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": [get_content_tool]
+    "mcp_tools": []
   }
 ]
 
@@ -202,15 +160,13 @@ Assess whether tools successfully fulfilled user requests by evaluating executio
 3. *Clarity* - Is output clear, structured, and in expected format?
 4. *Failure Handling* - Any errors or unrelated information returned?
 
-You must use the available tools at least once!
-
 **Scoring** (strict - zero tolerance for errors):
 - \"ideal\": Output perfectly solves task, all parts correct and complete
 - \"fair\": Output mostly correct but minor issues or omissions
 - \"poor\": Output fails task, incorrect, incomplete, or misleading
 
 Return JSON list: [{\"state_id\": \"...\", \"justification\": \"...\", \"score\": \"ideal|fair|poor\"}]",
-    "mcp_tools": [get_content_tool]
+    "mcp_tools": []
   }
 ]
 
@@ -229,7 +185,6 @@ Analyze execution trace to identify environment setup and configuration errors t
 3. *Environment Variables* - Missing or invalid env vars (os.environ KeyError)
 4. *Config Files* - Missing or malformed configs (FileNotFoundError, JSONDecodeError)
 5. *Dependencies* - Import errors or version conflicts (ModuleNotFoundError)
-You must use the available tools at least once!
 
 **Out of Scope**: HTTP status codes (401, 403, 429, 500), runtime API errors, network timeouts
 
@@ -239,7 +194,7 @@ You must use the available tools at least once!
 - \"poor\": Critical setup errors prevented system startup
 
 Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": [get_content_tool]
+    "mcp_tools": []
   }
 ]
 
@@ -251,7 +206,6 @@ Example 5 - API Issues Detection:
 Analyze execution trace to identify API-related errors during RUNTIME execution.
 
 **Scope**: Focus on runtime API communication errors, NOT initialization/config errors.
-You must use the available tools at least once!
 
 **Evaluation Criteria** - Look for trace entries showing:
 1. *Rate Limiting* - HTTP 429, "Rate limit exceeded" (RateLimitError)
@@ -272,160 +226,118 @@ Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
     "mcp_tools": []
   }
 ]
+"""
 
-Example 6 - Tool Selection Evaluation:
-[
-  {
-    "name": "TOOL_SELECTION_JUDGE",
-    "instructions": "**Instruction**:
-Assess whether tool selections made by the agent are appropriate for the task.
+async def main(
+    trace_dir: Path, anno_dir: Path, dir_to_save=Path("mad_results"), num_traces: int | None = None
+):
+    """Run metrics on TRAIL datadset"""
 
-**Evaluation Criteria**:
-1. *Tool Relevance* - Does the selected tool directly address the node_role responsibility?
-2. *Pipeline Position* - Is the tool suitable given the agent's position in the pipeline?
-3. *Justification* - Is the tool selection clearly supported by the task requirements?
-
-**Scoring**:
-- \"ideal\": Tool selection perfectly matches node_role and is clearly justified
-- \"fair\": Selection is relevant but potentially suboptimal for the task
-- \"poor\": Selection is inappropriate or clearly mismatched to node_role
-
-Return JSON: {\"score\": \"ideal|fair|poor\", \"justification\": \"...\"}",
-    "mcp_tools": []
-  }
-]"""
-
-
-def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
-    graph_dict = {}
-    _agents_info = agent_pool.full_agents_data
-
-    for agent in _agents_info:
-        if agent["name"] != "FINAL_AGGREGATOR":
-            graph_dict[agent["name"]] = ["FINAL_AGGREGATOR"]
-
-    graph_dict["FINAL_AGGREGATOR"] = []
-
-    return graph_dict
-
-
-async def main(save_folder: str, df):
-    logger.info(f"===Starting TRAIL evaluation===")
-
+    logger.info(f"Starting TRAIL evaluation:")
+    
     pool_gen = PoolGenerator(
         output_schema=output_schema, taxonomy=taxonomy, examples=examples
     )
+    graph_gen = GraphGenerator()
     judge_client = get_langfuse_judge_client()
-    logger.info("Initialized generators and Langfuse client")
+    logger.info("Initialized generators and Langfuse clients")
+
+    # Step 1: Get Langfuse client for downloading traces
+    # This uses LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY
+    print("=== Downloading traces from evaluation project ===")
+
+    data_dir = Path(trace_dir)
+
+    if num_traces is not None:
+        all_traces = [json.load(open(f)) for f in data_dir.glob("*.json")][:num_traces]
+    else:
+        all_traces = [json.load(open(f)) for f in data_dir.glob("*.json")]
+
+    def safe_load(f):
+        try:
+            with open(f, "r", encoding="utf-8") as file:
+                return json.load(file)
+        except:
+            return {}
+
+    anno = [safe_load(f) for f in Path(anno_dir).glob("*.json")]
+
+    def extract_summary(span):
+        # Build the summary for each span
+        summary = {
+            "span_id": span.get("span_id"),
+            "span_name": span.get("span_name"),
+            "span_attributes": span.get("span_attributes", {}),
+            "child_spans": []
+        }
+        # Recurse into children if present
+        for child in span.get("child_spans", []):
+            summary["child_spans"].append(extract_summary(child))
+        return summary
 
     # continue processing that was already started
+    # ======================
     done_traces = []
-    local_results_dir = Path(__file__).resolve().parent / "results" / save_folder
-    results_dir = local_results_dir
+    results_dir = dir_to_save
 
     if results_dir.exists():
         for res in os.listdir(results_dir):
             res_cropped = res.split(".")[0]
             done_traces.append(res_cropped)
+    # ======================
 
-    # skip failed traces
-    failed_traces_ids = []
     failed_traces = []
 
-    if local_results_dir.exists():
-        if "failed_traces.txt" in os.listdir(local_results_dir):
-            with open(local_results_dir / "failed_traces.txt", "r") as f:
-                for line in f:
-                    if line.startswith("Task ID:"):
-                        failed_traces_ids.append(line.split(":")[1].strip())
+    if os.path.exists(dir_to_save):
+        for file in os.listdir(dir_to_save):
+            if file.endswith(".txt"):
+                with open(os.path.join(dir_to_save, file), "r") as f:
+                    for line in f:
+                        if line.startswith("Task ID:"):
+                            failed_traces.append(line.split(":")[1].strip())
+ 
+    new_failed_traces = []
 
-    for idx in range(len(df)):
-        if df.iloc[idx]["trace_id"] in done_traces:
-            trace_id = df.iloc[idx]["trace_id"]
-            logger.info(f"Task {trace_id} already processed, skipping...")
+    # Run evaluation for each task
+    for idx, task in enumerate(all_traces):
+        if task["trace_id"] in done_traces:
+            logger.info(f"Task {task['trace_id']} already processed, skipping...")
             continue
 
-        if df.iloc[idx]["trace_id"] in failed_traces_ids:
-            logger.info(
-                f"Task {df.iloc[idx]["trace_id"]} already failed, skipping..."
-            )
+        if task["trace_id"] in failed_traces:
+            logger.info(f"Task {task['trace_id']} already failed, skipping...")
             continue
-
-        task = df.iloc[idx]["trace_id"]
-        logger.info(f"Processing task {idx + 1}/{len(df)}: {task}")
+        
+        logger.info(f"Processing task {idx + 1}/{len(all_traces)}: {task['trace_id']}")
         serializable_results = {}
 
         try:
-            # trace_data = {
-            #     "history": df.iloc[idx]["spans"],
-            #     "question": "You should evaluate the trace.",
-            #     "task_id": df.iloc[idx]["trace_id"],
-            #     "trace_id": df.iloc[idx]["trace_id"],
-            # }
-            # q = trace_data["question"][:100]
-            trace_data = {
-                "history": df.iloc[idx]["history"],
-                "question": "You should evaluate the trace.",
-                "task_id": df.iloc[idx]["task_id"],
-                "trace_id": df.iloc[idx]["trace_id"],
-            }
-            q = trace_data["question"][:100]
+            trace_data = task["spans"]
+            rewritten_json = [extract_summary(span) for span in trace_data]
+            trace_data = str(json.dumps(rewritten_json, indent=2))
 
-            logger.debug(f"Parsed task query: {q}...")
+            annotation = [
+                i for i in anno if i.get("trace_id", "") == task["spans"][0]["trace_id"]
+            ]
 
-            trace_metadata = {
-                "task_id": trace_data["task_id"],
-                "trace_id": trace_data["trace_id"],
-            }
-
-            judge_input = str(
-                {
-                    "query": trace_data["question"],
-                    "history_for_evaluating": trace_data["history"],
-                }
-            )
-
-            logger.info("Generating judge pool...")
-
-            try:
-                attempts = 0
-                while attempts < 3:
-                    pool = await pool_gen.create_pool(judge_input)
-                    agents_info = pool.full_agents_data
-                    final_agent = any(
-                        agent.get("name") == "FINAL_AGGREGATOR" for agent in agents_info
-                    )
-                    if final_agent:
-                        break
-                    attempts += 1
-
-            except Exception as e:
-                error_msg = str(e)
-                safe_error_msg = error_msg.replace("{", "{{").replace("}", "}}")
-                logger.error(
-                    f"Error processing task {df.iloc[idx]["trace_id"]}: {safe_error_msg}",
-                    exc_info=True,
-                )
-
-                failed_traces.append(
-                    {
-                        "task_id": df.iloc[idx]["trace_id"],
-                        "task_index": idx + 1,
-                        "error": error_msg,
-                        "error_type": type(e).__name__,
-                    }
-                )
-
-                print(
-                    f"\n!  Failed task {idx + 1}/{len(df)}: {df.iloc[idx]["trace_id"]}"
-                )
-                print(f"   Error: {error_msg}\n")
+            if annotation == []:
                 continue
+            annotation = annotation[0]
 
+            # Prepare metadata for the trace
+            trace_metadata = {
+                "trace_id": task["trace_id"],
+                "ЕTRAIL_trace": task["spans"],
+            }
+
+            judge_input = str({"history_for_evaluating": trace_data})
+            
+            logger.info("Generating judge pool...")
+            pool = await pool_gen.create_pool(judge_input)
             logger.info(f"Created pool with {len(pool)} judges")
-
+            
             logger.info("Generating evaluation graph...")
-            graph = get_parallel_graph(pool)
+            graph = await graph_gen.create_graph(pool, judge_input)
             logger.debug(f"Graph structure: {graph}")
 
             builder = PipelineBuilder()
@@ -433,48 +345,71 @@ async def main(save_folder: str, df):
             pipeline.to_mermaid_lr(visualize=True)
             logger.info(f"Built pipeline with {len(pipeline.execution_order)} nodes")
 
+            # Create a parent span for all evaluations of this task
+            # All metric evaluations will be grouped under this span
             with judge_client.start_as_current_span(
-                name=f"evaluate_task_{task}",
-                input={
-                    "task_id": df.iloc[idx]["trace_id"],
-                    "trace_id": df.iloc[idx]["trace_id"],
-                },
+                name=f"evaluate_task_{task['trace_id']}",
+                input={"trace_id": task["trace_id"]},
                 metadata=trace_metadata,
             ) as span:
-                judge_client.update_current_trace(tags=["test", f"task_id:{task}"])
-
-                logger.info("Executing evaluation pipeline...")
-                result, trace_id = await ainvoke_with_lf(
-                    pool, pipeline, judge_input, graph
+                # Update the trace with tags (tags are set at trace level, not span level)
+                judge_client.update_current_trace(
+                    tags=["test", f"task_id:{task['trace_id']}"] #trail_launch_test_30_traces_rewritten_json_gemini_pool_generator
                 )
+                
+                logger.info("Executing evaluation pipeline...")
+                result, trace_id = await ainvoke_with_lf(pool, pipeline, judge_input, graph)
                 logger.info(f"Pipeline execution completed. Trace ID: {trace_id}")
-
+                
                 span.update(output={"result": result, "trace_id": trace_id})
                 span.end()
 
-            if result.startswith("```json"):
-                result = result.strip("```json").strip("```")
-            else:
-                result = result.strip()
-
             result_dict = json.loads(result)
 
+            score_obj = result_dict["scores"][0]
             serializable_results["summarizer_score"] = {
                 "metric_name": "summarizer_score",
                 "scores": [
                     {
+                        "item_id": "reliability",
+                        "score": score_obj["reliability_score"],
+                        "justification": score_obj["reliability_reasoning"],
+                    },
+                    {
+                        "item_id": "security",
+                        "score": score_obj["security_score"],
+                        "justification": score_obj["security_reasoning"],
+                    },
+                    {
+                        "item_id": "instruction_adherence",
+                        "score": score_obj["instruction_adherence_score"],
+                        "justification": score_obj["instruction_adherence_reasoning"],
+                    },
+                    {
+                        "item_id": "plan_opt",
+                        "score": score_obj["plan_opt_score"],
+                        "justification": score_obj["plan_opt_reasoning"],
+                    },
+                    {
                         "item_id": "overall_score",
-                        "score": result_dict,
-                        "idx": idx,
-                        "task_id": df.iloc[idx]["trace_id"],
-                        "filename": df.iloc[idx]["filename"],
-                    }
+                        "score": score_obj["overall"],
+                        "justification": (
+                            "Reliability: "
+                            + score_obj["reliability_reasoning"]
+                            + " Security: "
+                            + score_obj["security_reasoning"]
+                            + " Instruction adherence: "
+                            + score_obj["instruction_adherence_reasoning"]
+                            + " Plan optimization: "
+                            + score_obj["plan_opt_reasoning"]
+                        ),
+                    },
                 ],
             }
 
-            output_dir = local_results_dir
+            output_dir = dir_to_save
             output_dir.mkdir(parents=True, exist_ok=True)
-            output_file = output_dir / Path(f"{df.iloc[idx]['trace_id']}.json")
+            output_file = output_dir / Path(f"{task['trace_id']}.json")
 
             with open(output_file, "w") as f:
                 json.dump(serializable_results, f, indent=2)
@@ -487,91 +422,48 @@ async def main(save_folder: str, df):
         except Exception as e:
             error_msg = str(e)
             safe_error_msg = error_msg.replace("{", "{{").replace("}", "}}")
-            task_id = df.iloc[idx]["trace_id"]
-            logger.error(
-                f"Error processing task {task_id}: {safe_error_msg}", exc_info=True
-            )
-
-            failed_traces.append(
-                {
-                    "task_id": task_id,
-                    "task_index": idx + 1,
-                    "error": error_msg,
-                    "error_type": type(e).__name__,
-                }
-            )
-
-            print(f"\n!  Failed task {idx + 1}/{len(df)}: {task_id}")
+            task_id = task["trace_id"]
+            logger.error(f"Error processing task {task_id}: {safe_error_msg}", exc_info=True)
+            
+            failed_traces.append({
+                "task_id": task_id,
+                "task_index": idx + 1,
+                "error": error_msg,
+                "error_type": type(e).__name__
+            })
+            
+            print(f"\n!  Failed task {idx + 1}/{len(all_traces)}: {task_id}")
             print(f"   Error: {error_msg}\n")
-            continue
-
-    output_dir = local_results_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
-    failed_file = output_dir / "failed_traces.txt"
-
-    if failed_traces:
-        first_run = not failed_file.exists()
-        with open(failed_file, "a") as f:
-            if first_run:
-                f.write(f"Failed traces: {len(failed_traces)} out of {len(df)}\n")
-                f.write("=" * 80 + "\n\n")
-
-            for failed in failed_traces:
+            continue 
+    
+    if new_failed_traces:
+        output_dir = dir_to_save
+        output_dir.mkdir(parents=True, exist_ok=True)
+        failed_file = output_dir / "failed_traces.txt"
+        
+        with open(failed_file, "w") as f:
+            f.write(f"Failed traces: {len(failed_traces)} out of {len(all_traces)}\n")
+            f.write("=" * 80 + "\n\n")
+            
+            for failed in new_failed_traces:
                 f.write(f"Task ID: {failed['task_id']}\n")
-                f.write(f"Index: {failed['task_index']}/{len(df)}\n")
+                f.write(f"Index: {failed['task_index']}/{len(all_traces)}\n")
                 f.write(f"Error Type: {failed['error_type']}\n")
                 f.write(f"Error Message: {failed['error']}\n")
                 f.write("-" * 80 + "\n\n")
-
-    if len(failed_traces) > 0:
-        logger.warning(
-            f"\n!  {len(failed_traces)} traces failed. Details saved to: {failed_file}\n"
-        )
-
-    if failed_traces_ids:
-        logger.info(
-            f"Completed evaluation: {len(df) - (len(failed_traces) + len(failed_traces_ids))}/{len(df)} successful, {len(failed_traces) + len(failed_traces_ids)} failed"
-        )
-    else:
-        logger.info(
-            f"Completed evaluation: {len(df) - (len(failed_traces))}/{len(df)} successful, {len(failed_traces)} failed"
-        )
-
-
-def create_gaia_dataframe():
-    gaia_dir = Path("path/to/your/directory")
-
-    json_files = list(gaia_dir.glob("*.json"))
-
-    if not json_files:
-        return None
-
-    files_to_process = json_files
-
-    data_list = []
-
-    for i, file_path in enumerate(files_to_process, 1):
-        try:
-            print(f"[{i:2d}/{len(files_to_process)}] {file_path.name}")
-
-            with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            data["filename"] = file_path.name
-            data["file_path"] = str(file_path)
-
-            data_list.append(data)
-
-        except Exception as e:
-            print(f"Error during processing of {file_path.name}: {e}")
-            continue
-
-    df = pd.json_normalize(data_list)
-    print(df.head(3))
-    print(df.info())
-    return df
+        
+        logger.warning(f"\n!  {len(new_failed_traces)} traces failed. Details saved to: {failed_file}\n")
+        print(f"\n!  {len(new_failed_traces)} traces failed. Details saved to: {failed_file}\n")
+    
+    logger.info(f"Completed evaluation: {len(all_traces) - len(new_failed_traces)}/{len(all_traces)} successful, {len(new_failed_traces)} failed")
 
 
 if __name__ == "__main__":
-    df = create_gaia_dataframe()
-    asyncio.run(main(save_folder="test", df=df))
+    asyncio.run(
+        main(
+            trace_dir="/home/user/Desktop/AutoMAS/AutoJudge/trail-benchmark/benchmarking/data/GAIA",
+            anno_dir="/home/user/Desktop/AutoMAS/AutoJudge/trail-benchmark/benchmarking/processed_annotations_gaia",
+            dir_to_save=Path(__file__).parent / "results" / "trail_30_traces_rewritten_json_gemini_pool_generator",
+            num_traces=5,
+        )
+    )
