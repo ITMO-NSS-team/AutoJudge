@@ -1,12 +1,9 @@
 import os
 from typing import List, Optional
-
 from pydantic import BaseModel
-
 from autojudge.agent_pool import AgentPool
 from autojudge.pipeline.node import AgentNode
 from autojudge.utils import get_logger
-
 from .base import BaseMetaAgent
 from .prompts import (
     DEFAULT_POOL_INSTRUCT_EXTENDED,
@@ -21,6 +18,7 @@ class AgentSchema(BaseModel):
     instructions: str
     mcp_tools: List[str] = []
     model: str = os.getenv("AGENT_NODE_MODEL", "google/gemini-2.5-flash")
+    use_tools: bool = True  # added from new version
 
 
 class PoolGenerator(BaseMetaAgent):
@@ -37,6 +35,7 @@ class PoolGenerator(BaseMetaAgent):
             f"Initializing PoolGenerator with model={model}, temperature={temperature}, summary: {use_summary}"
         )
         self.summary = use_summary
+        self.use_tools = use_summary  # derived: summary mode implies tool-enabled prompt
         self.schema = output_schema
         self.taxonomy = taxonomy
         self.examples = examples
@@ -46,7 +45,7 @@ class PoolGenerator(BaseMetaAgent):
         )
 
     def _get_system_prompt(self) -> str:
-        if not (self.summary):
+        if not self.summary:
             return DEFAULT_POOL_INSTRUCT_EXTENDED_no_db_tool.substitute(
                 taxonomy=self.taxonomy,
                 judge_output_format=self.schema,
@@ -65,17 +64,16 @@ class PoolGenerator(BaseMetaAgent):
     def _create_agents(self, agent_schemas: List[AgentSchema]) -> List[AgentNode]:
         if not agent_schemas:
             raise ValueError("No valid agents generated")
-
         logger.info(
             f"Creating {len(agent_schemas)} agents: {[s.name for s in agent_schemas]}"
         )
-
         return [
             AgentNode(
                 name=schema.name,
                 instructions=schema.instructions,
                 model=schema.model,
-                mcp_tools=[schema.mcp_tools],
+                mcp_tools=[schema.mcp_tools],  # kept original wrapping
+                use_tools=self.use_tools,       # added from new version
             )
             for schema in agent_schemas
         ]
@@ -84,13 +82,9 @@ class PoolGenerator(BaseMetaAgent):
         self, task_description: str, context: Optional[str] = None
     ) -> AgentPool:
         user_prompt = f"TASK: {task_description}"
-
         if context:
             user_prompt += f"\n\nPREVIOUS ATTEMPT FEEDBACK:\n{context}"
-
         agent_schemas = await self._run_agent(user_prompt)
         agents = self._create_agents(agent_schemas)
-
         logger.info(f"Successfully created agent pool with {len(agents)} agents")
-
         return AgentPool(agents)
