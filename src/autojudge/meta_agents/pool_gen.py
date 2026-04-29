@@ -4,6 +4,8 @@ from pydantic import BaseModel
 from autojudge.agent_pool import AgentPool
 from autojudge.pipeline.node import AgentNode
 from autojudge.utils import get_logger
+from dotenv import load_dotenv
+
 from .base import BaseMetaAgent
 from .prompts import (
     DEFAULT_POOL_INSTRUCT_EXTENDED,
@@ -11,6 +13,7 @@ from .prompts import (
 )
 
 logger = get_logger()
+load_dotenv(".env")
 
 
 class AgentSchema(BaseModel):
@@ -24,7 +27,7 @@ class AgentSchema(BaseModel):
 class PoolGenerator(BaseMetaAgent):
     def __init__(
         self,
-        model: str = os.getenv("POOL_GEN_MODEL", "google/gemini-2.5-flash"),
+        model: str = os.getenv("POOL_GEN_MODEL", "deepseek/deepseek-v4-pro"),
         temperature: float = 0.3,
         output_schema: str = "",
         taxonomy: str = "",

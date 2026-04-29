@@ -41,7 +41,7 @@ def main(folder_path: str):
                 try:
                     # gt_step is 0-based in the dataset; normalize to 1-based to match judge output
                     gt_step = int(item["gt_step"]) + 1  # for eval steps starting from 1
-                    gt_step = int(item["gt_step"])  # for eval steps starting from 0
+                    # gt_step = int(item["gt_step"])  # for eval steps starting from 0
 
                     pred_step = int(item["score"]["step"])
                     step_total += 1
@@ -94,5 +94,5 @@ def main(folder_path: str):
 
 
 if __name__ == "__main__":
-    DIR = "examples/who_and_when/results/your_folder"
+    DIR = "/home/alina/Desktop/AutoJudge/examples/who_and_when/results/pool_gen_qwen_3_32b_ww_hand_it1"
     main(DIR)
