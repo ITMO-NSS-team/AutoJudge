@@ -257,9 +257,9 @@ async def main(
 
 if __name__ == "__main__":
     df_original = pd.read_json(
-        "/home/alina/Desktop/AutoJudge/examples/agent_error_bench/AgentErrorBench/Label/alfworld_labels.json"
+        "/home/alina/Desktop/AutoJudge/examples/agent_error_bench/AgentErrorBench/Label/gaia_labels.json"
     )
-    summaries_directory = Path("/home/alina/Desktop/AutoJudge/ALFWorld")
+    summaries_directory = Path("/home/alina/Desktop/AutoJudge/summaries_agent_error_test/summaries_agent_error_test/GAIA")
 
     summary = []
     for file_path in summaries_directory.iterdir():
@@ -271,7 +271,7 @@ if __name__ == "__main__":
 
     asyncio.run(
         main(
-            save_folder="alfworld_sm_db_16_04",
+            save_folder="gaia_sm_db_20_04",
             df=df_original,
             df_summary=df_summary,
             table_name="agent_error",
