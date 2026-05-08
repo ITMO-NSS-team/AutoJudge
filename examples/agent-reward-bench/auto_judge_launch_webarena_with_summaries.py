@@ -1,4 +1,4 @@
-"""AutoJudge evaluation for WebArena agent trajectories (full trace, no DB tool)."""
+"""AutoJudge evaluation for WebArena agent trajectories (summarized steps, DB tool)."""
 import argparse
 import asyncio
 import contextlib
@@ -23,8 +23,8 @@ from autojudge.pipeline import PipelineBuilder
 from autojudge.utils import get_logger
 
 from autojudge.meta_agents.prompts import (
-    examples_webarena as examples,
-    webarena_output_schema as output_schema,
+    examples_tools as examples,
+    webarena_output_schema_with_summaries as output_schema,
     webarena_taxonomy as taxonomy,
 )
 
@@ -73,59 +73,37 @@ async def create_pool_with_retries(pool_gen, judge_input: dict, max_attempts: in
     raise RuntimeError(f"Failed to create pool after {max_attempts} attempts. Errors:\n{error_block}")
 
 
-def format_trace_for_judge(trace_data: dict) -> str:
-    """Format WebArena trace exactly like ARB (excluding images)."""
+def format_trace_for_judge(trace_data: dict, trace_id: str, max_steps: int = 30) -> str:
+    """Format WebArena trace into judge input with short summaries."""
     steps = trace_data.get("steps", [])
+    summary_info = trace_data.get("summary_info") or {}
 
-    STEP_TEMPLATE = (
-        "-----\n"
-        "Step: {step_number}\n"
-        "URL: {url}\n"
-        "Action: {action}\n"
-        "Reasoning: {reasoning}\n"
-    )
-    ACTION_TEMPLATE = (
-        "The agent performed the following actions:\n"
-        "{steps}\n"
-        "-----\n"
-    )
-    AXTREE_TEMPLATE = (
-        "The last accessibility tree is:\n"
-        "{axtree}\n"
-    )
+    lines = [
+        f"Goal: {str(trace_data.get('goal', '')).strip()[:200]}",
+        f"Model: {trace_data.get('model', '')}",
+        f"Steps taken: {len(steps)}",
+        f"Ground truth task success: {summary_info.get('task_success')}",
+        "Step sequence summaries (Use get_content_tool with the listed state_id for full details!):",
+    ]
 
-    steps_str = ""
-    for i, step in enumerate(steps):
+    for i, step in enumerate(steps[:max_steps], 1):
         if not isinstance(step, dict):
             continue
 
-        steps_str += STEP_TEMPLATE.format(
-            step_number=i + 1,
-            url=step.get("url", "unknown"),
-            action=step.get("action", "unknown"),
-            reasoning=step.get("reasoning", "")
-        )
+        action = str(step.get("action") or "unknown")[:100]
+        err_val = step.get('last_action_error')
+        error = f" [ERROR: {str(err_val)[:40]}]" if err_val else ""
+        lines.append(f"  - state_id: {trace_id}_{i} | action_summary: {action}{error}")
 
-    action_msg = ACTION_TEMPLATE.format(steps=steps_str)
+    if len(steps) > max_steps:
+        lines.append(f"  ... ({len(steps) - max_steps} more steps)")
 
-    last_step = steps[-1] if steps else {}
-    axtree_content = ""
-    if "axtree_pruned" in last_step and last_step["axtree_pruned"]:
-        axtree_content = last_step["axtree_pruned"]
-    elif "axtree" in last_step and last_step["axtree"]:
-        axtree_content = last_step["axtree"]
-
-    if axtree_content:
-        axtree_msg = AXTREE_TEMPLATE.format(axtree=axtree_content)
-    else:
-        axtree_msg = ""
-
-    return action_msg + "\n" + axtree_msg
+    return "\n".join(lines)
 
 
 async def evaluate_trace(trace_id: str, trace_data: dict, pool_gen, judge_client) -> dict:
     # Prepare judge input
-    history_for_evaluating = format_trace_for_judge(trace_data)
+    history_for_evaluating = format_trace_for_judge(trace_data, trace_id=trace_id)
     judge_input_dict = {
         "goal": trace_data.get("goal", ""),
         "trace_id": trace_id,
@@ -133,17 +111,16 @@ async def evaluate_trace(trace_id: str, trace_data: dict, pool_gen, judge_client
     }
     judge_input = str(judge_input_dict)
 
-    # Don't send the entire massive trace to the generator LLM
-    pool_gen_input_dict = {
-        "goal": trace_data.get("goal", ""),
-        "trace_id": trace_id,
-    }
-    pool = await create_pool_with_retries(pool_gen, pool_gen_input_dict)
+    # Create pool with retries
+    pool = await create_pool_with_retries(pool_gen, judge_input_dict)
 
     # Build pipeline
     graph = get_parallel_graph(pool)
     builder = PipelineBuilder()
     pipeline = builder.create_from_pool(pool, graph).build()
+
+    # Execute with Langfuse tracing (if available)
+    raw_result = None
 
     ctx_mgr = judge_client.start_as_current_span(
         name=f"evaluate_webarena_{trace_id}",
@@ -153,7 +130,7 @@ async def evaluate_trace(trace_id: str, trace_data: dict, pool_gen, judge_client
 
     with ctx_mgr as span:
         if judge_client:
-            judge_client.update_current_trace(tags=["webarena", "arb", "autojudge", f"task_id:{trace_id}"])
+            judge_client.update_current_trace(tags=["webarena", "db_tool", "arb", "autojudge", f"task_id:{trace_id}"])
 
         raw_result = await pipeline.ainvoke(judge_input)
 
@@ -304,7 +281,7 @@ async def main(data_dir: str, save_folder: str, max_traces: int | None = None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate WebArena with AutoJudge")
     parser.add_argument("--data-dir", default="examples/agent-reward-bench/data", help="Path to base data directory containing cleaned/ and pruned/ folders")
-    parser.add_argument("--save-folder", default="webarena_results_fixed", help="Output folder name")
+    parser.add_argument("--save-folder", default="webarena_results_db", help="Output folder name")
     parser.add_argument("--max-traces", type=int, default=None, help="Max traces to evaluate")
     parser.add_argument("--test", action="store_true", help="Test mode: run on 5 traces")
 

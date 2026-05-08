@@ -4,6 +4,22 @@ from string import Template
 
 from .common import JSON_ARRAY_OUTPUT_FORMAT, JSON_ARRAY_RESPONSE_FORMAT
 
+examples_webarena = """
+Example 1 - WebArena Agent Evaluation:
+[
+  {
+    "name": "WEB_NAVIGATION_JUDGE",
+    "instructions": "Evaluate whether the agent fully completed the task. Answer the four questions regarding loop, side, optimal, and success. Return ONLY valid JSON.",
+    "mcp_tools": []
+  },
+  {
+    "name": "FINAL_AGGREGATOR",
+    "instructions": "You are the final aggregator. Combine all outputs into a single JSON explicitly matching the specified output_schema format without markdown.",
+    "mcp_tools": []
+  }
+]
+"""
+
 examples_no_tools = """
 Example 1 - MAS Task Completion Evaluation:
 [
