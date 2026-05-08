@@ -12,7 +12,6 @@ from .pool_prompts import (
     DEFAULT_POOL_INSTRUCT_EXTENDED_WW_no_db_tool,
     examples_no_tools,
     examples_tools,
-    examples_webarena,
 )
 from .summarization_prompts import (
     STEP_BY_STEP_SUMMARIZATION_PROMPT,
@@ -39,7 +38,6 @@ __all__ = [
     "TRACE_SUMMARIZATION_PROMPT",
     "STEP_BY_STEP_SUMMARIZATION_PROMPT",
     "STEPS_BATCH_SUMMARIZATION_PROMPT",
-    "examples_webarena",
     "webarena_taxonomy",
     "webarena_output_schema",
     "webarena_output_schema_with_summaries",

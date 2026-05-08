@@ -23,7 +23,7 @@ from autojudge.pipeline import PipelineBuilder
 from autojudge.utils import get_logger
 
 from autojudge.meta_agents.prompts import (
-    examples_webarena as examples,
+    examples_no_tools as examples,
     webarena_output_schema as output_schema,
     webarena_taxonomy as taxonomy,
 )
