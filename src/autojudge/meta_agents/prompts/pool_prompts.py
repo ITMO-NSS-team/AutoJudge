@@ -4,6 +4,7 @@ from string import Template
 
 from .common import JSON_ARRAY_OUTPUT_FORMAT, JSON_ARRAY_RESPONSE_FORMAT
 
+
 examples_no_tools = """
 Example 1 - MAS Task Completion Evaluation:
 [

@@ -18,6 +18,9 @@ from .summarization_prompts import (
     STEPS_BATCH_SUMMARIZATION_PROMPT,
     TRACE_SUMMARIZATION_PROMPT,
 )
+from .output_schema_prompts.webarena_bench import output_schema as webarena_output_schema
+from .output_schema_prompts.webarena_bench import output_schema_with_summaries as webarena_output_schema_with_summaries
+from .output_schema_prompts.webarena_bench import taxonomy as webarena_taxonomy
 # from .unified_prompts import UNIFIED_GEN_INSTRUCT
 
 __all__ = [
@@ -35,15 +38,7 @@ __all__ = [
     "TRACE_SUMMARIZATION_PROMPT",
     "STEP_BY_STEP_SUMMARIZATION_PROMPT",
     "STEPS_BATCH_SUMMARIZATION_PROMPT",
+    "webarena_taxonomy",
+    "webarena_output_schema",
+    "webarena_output_schema_with_summaries",
 ]
-
-from .output_schema_prompts.ae_bench import output_schema as ae_output_schema
-from .output_schema_prompts.ae_bench import taxonomy as ae_taxonomy
-from .output_schema_prompts.aegis_bench import output_schema as aegis_output_schema
-from .output_schema_prompts.aegis_bench import taxonomy as aegis_taxonomy
-from .output_schema_prompts.pumpkin_bench import output_schema as pumpkin_output_schema
-from .output_schema_prompts.pumpkin_bench import taxonomy as pumpkin_taxonomy
-from .output_schema_prompts.trail_bench import output_schema as trail_output_schema
-from .output_schema_prompts.trail_bench import taxonomy as trail_taxonomy
-from .output_schema_prompts.ww_bench import output_schema as ww_output_schema
-from .output_schema_prompts.ww_bench import taxonomy as ww_taxonomy
