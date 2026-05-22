@@ -23,17 +23,18 @@ class AgentSchema(BaseModel):
     model: str = os.getenv("AGENT_NODE_MODEL", "google/gemini-2.5-flash")
     use_tools: bool = True  # added from new version
 
-
 class PoolGenerator(BaseMetaAgent):
     def __init__(
         self,
         model: str = os.getenv("POOL_GEN_MODEL", "deepseek/deepseek-v4-pro"),
-        temperature: float = 0.3,
+        temperature: float = float(os.getenv("POOL_GEN_TEMPERATURE", 0.3)),
         output_schema: str = "",
         taxonomy: str = "",
         examples: str = "",
         use_summary: bool = False,
     ):
+        if os.environ['POOL_GEN_TEMPERATURE'] != temperature:
+            print('ATTENTION: Found another PoolGenerator temperature in config file: ', os.getenv("POOL_GEN_TEMPERATURE"))
         print(
             f"Initializing PoolGenerator with model={model}, temperature={temperature}, summary: {use_summary}"
         )

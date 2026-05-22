@@ -14,12 +14,12 @@ from autojudge.db.db_tools import get_content_tool
 from autojudge.pipeline.types import UsageTrackingMixin
 from autojudge.utils.langfuse_utils import setup_langfuse_instrumentation
 
-load_dotenv()
+load_dotenv(".env")
 
 setup_langfuse_instrumentation()
 
 AGENT_NODE_TEMPERATURE = float(os.getenv("AGENT_NODE_TEMPERATURE", "0.1"))
-
+print('Judge temperature = ', AGENT_NODE_TEMPERATURE)
 
 @dataclass
 class AgentNode(UsageTrackingMixin):
@@ -44,6 +44,7 @@ class AgentNode(UsageTrackingMixin):
             raise RuntimeError("No API key provided")
 
     def build_agent(self) -> Agent:
+        print('Judge model: ', self.model)
         model = OpenAIChatModel(
             self.model,
             provider=OpenRouterProvider(api_key=self.api_key or ""),

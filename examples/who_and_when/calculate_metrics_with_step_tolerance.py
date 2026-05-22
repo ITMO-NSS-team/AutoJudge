@@ -94,5 +94,5 @@ def main(folder_path: str):
 
 
 if __name__ == "__main__":
-    DIR = "/home/alina/Desktop/AutoJudge/examples/who_and_when/results/pool_gen_qwen_3_32b_ww_hand_it1"
+    DIR = "/home/alina/Desktop/AutoJudge/examples/who_and_when/results/temp_exp_judge_00_ww_hand_it3"
     main(DIR)

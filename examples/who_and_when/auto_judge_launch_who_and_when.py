@@ -14,7 +14,6 @@ import json
 
 import pandas as pd
 from maseval import get_langfuse_judge_client
-from toon_format import encode
 
 from autojudge.meta_agents import PoolGenerator
 from autojudge.meta_agents.graph_gen import get_parallel_graph
@@ -30,7 +29,7 @@ async def main(save_folder: str, df):
     logger.info(f"===Starting Who&When evaluation===")
 
     pool_gen = PoolGenerator(
-        output_schema=ww_output_schema, taxonomy=ww_taxonomy, examples=examples, temperature = 0.7, use_tools = False
+        output_schema=ww_output_schema, taxonomy=ww_taxonomy, examples=examples
     )
     judge_client = get_langfuse_judge_client()
     logger.info("Initialized generators and Langfuse client")
@@ -157,7 +156,7 @@ async def main(save_folder: str, df):
                 metadata=trace_metadata,
             ) as span:
                 judge_client.update_current_trace(
-                    tags=["test", f"temp_05_task_id:{q_id}"]
+                    tags=["jd_temp", f"temp_00:{q_id}"]
                 )
 
                 logger.info("Executing evaluation pipeline...")
@@ -273,7 +272,7 @@ if __name__ == "__main__":
 
     asyncio.run(
         main(
-            save_folder="gen_temp_07_ww_hand_it1",
+            save_folder="temp_exp_judge_00_ww_hand_it1",
             df=df_handcrafted[:],
         )
     )
