@@ -1,12 +1,4 @@
-# AutoJudge: Dynamic Generation of LLM Judge Pipelines for Multi-Agent System Evaluation
-
-Official anonymous repository for the paper:
-
-> **AutoJudge: Automatic Generation of LLM-Based Judges from Execution Traces**
-
----
-
-# Overview
+# AutoJudge
 
 Modern LLM-based multi-agent systems (MAS) generate complex execution traces containing:
 
@@ -333,19 +325,6 @@ The repository includes:
 - trace processing utilities.
 
 All major experiments from the paper are reproducible using the provided scripts.
-
----
-
-# Citation
-
-```bibtex
-@article{anonymous2026autojudge,
-  title={AutoJudge: Automatic Generation of LLM-Based Judges from Execution Traces},
-  author={Anonymous Authors},
-  journal={Under Review},
-  year={2026}
-}
-```
 
 ---
 
