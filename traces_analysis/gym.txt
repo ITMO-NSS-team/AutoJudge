@@ -1,0 +1,26 @@
+trace-10b6a1044c9f7f4f9733b2fd22d1b991
+
+Task: "Which gyms near Tompkins Square Park (<200m) have fitness classes before 7am?"
+GT: "CrossFit East River, Avea Pilates"
+
+Trace specifics:
+- Dual constraint: spatial (<200 m from a point) and temporal (classes before 7am).
+- WebSurfer searches Bing and clicks gym cards in the results sidebar without opening the gyms' own sites - a loop; schedules never retrieved.
+- At step 21, a terminal crash: "Error processing publish message … ResponsibleAIPolicyViolation".
+- MAS final answer - "Equinox Flatiron, Nimble Fitness" (both wrong).
+Agents (roles from the trace):
+- Orchestrator - the lead: maintains a Task Ledger (facts / to look up / to derive) and a Progress Ledger, each round decides whether the request is satisfied and picks the next worker.
+- WebSurfer - the web worker (Bing search, clicks, scroll, screenshot OCR).
+- Assistant - final-answer summarizer. Declared in the plan but never ran - the run crashed at step 21.
+
+A task-specific judge panel was generated: GEOSPATIAL_PRECISION_JUDGE (the <200 m constraint), TOOL_EXECUTION_JUDGE (web navigation), SYSTEM_INTEGRITY_JUDGE (runtime errors), FINAL_AGGREGATOR (fusion).
+
+The error and why AutoJudge caught it correctly
+All three judges independently inspected the same step 21 and gave different lenses, all score: "poor":
+- TOOL_EXECUTION_JUDGE: "The WebSurfer repeatedly clicked on the same search results page instead of navigating to the individual gym websites… a lack of effective navigation… failed to execute this by not moving beyond the initial search results."
+- SYSTEM_INTEGRITY_JUDGE: "The system entered a loop where WebSurfer repeatedly clicked… without navigating to their individual websites… a 'content filtering error'… a terminal error preventing further execution."
+- GEOSPATIAL_PRECISION_JUDGE: "…it's unclear if their schedules were fully verified or if the 200m constraint was strictly adhered to… The traceback indicates a 'ResponsibleAIPolicyViolation' which prevented further processing."
+FINAL_AGGREGATOR - agent: "WebSurfer", step: "21": "…repeatedly clicked on the same search results page instead of navigating to individual gym websites… leading to a loop. Additionally, a content filtering error… a terminal error…"
+Both real causes (navigation loop, terminal crash) are caught by the specialized judges.
+
+Reference answer "CrossFit East River, Avea Pilates", MAS returned "Equinox Flatiron, Nimble Fitness" (wrong). AutoJudge independently rated the run "poor", and its diagnosis (navigation loop, unverified constraints, terminal error) matches the actual trace content.
