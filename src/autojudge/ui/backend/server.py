@@ -52,6 +52,10 @@ tasks = {}
 
 @asynccontextmanager
 async def lifespan(app):
+    for pool in records('judge-pools'):
+        if pool['status'] == 'Running':
+            pool.update(status='Interrupted',error='Server restarted; request may have been billed')
+            put('judge-pools',pool['id'],pool)
     for run in records('runs'):
         if run['status'] == 'Running':
             run.update(status='Interrupted', verdict='Server restarted; inspect partial outputs; AI requests may be billed')
@@ -63,6 +67,66 @@ async def lifespan(app):
 
 
 app = FastAPI(title='AutoJudge local API', lifespan=lifespan)
+pool_lock = asyncio.Lock()
+
+
+class PoolRequest(BaseModel):
+    objective: str = Field(min_length=1, max_length=20000)
+    taxonomy: str = Field(min_length=1, max_length=50000)
+    schema_text: str = Field(min_length=1, max_length=30000)
+    examples: str = Field(default='[]', max_length=30000)
+    confirm_paid: bool = False
+
+
+@app.get('/api/judge-pools')
+def list_pools():
+    return records('judge-pools')
+
+
+@app.post('/api/judge-pools/generate')
+async def generate_pool(body: PoolRequest, request: Request):
+    check_credential_origin(request)
+    if not body.confirm_paid:
+        raise HTTPException(403, 'Explicit AI generation confirmation required')
+    if pool_lock.locked():
+        raise HTTPException(409, 'Pool generation is already running')
+    try:
+        from jsonschema import Draft202012Validator
+        schema = json.loads(body.schema_text)
+        Draft202012Validator.check_schema(schema)
+        if not isinstance(schema,dict) or schema.get('type') != 'object' or not isinstance(json.loads(body.examples),list):
+            raise ValueError()
+    except Exception:
+        raise HTTPException(422, 'Invalid output schema or examples')
+    async with pool_lock:
+        try:
+            key, _, _, endpoint = ai_settings()
+            fields = {f['name']:f['value'] for f in get_env_settings()['fields']}
+            model = fields['POOL_GEN_MODEL'].strip()
+            temperature = fields['POOL_GEN_TEMPERATURE']
+            env_settings.validate('POOL_GEN_TEMPERATURE',temperature)
+            if not model: raise ValueError()
+        except Exception:
+            raise HTTPException(422, 'Check AI connection and pool generation settings')
+        from urllib.parse import urlparse
+        if not key and urlparse(endpoint).hostname not in ('localhost','127.0.0.1','::1'):
+            raise HTTPException(422,'Set the provider API key in Settings')
+        config = {'objective':body.objective,'taxonomy':body.taxonomy,'schema':body.schema_text,'examples':body.examples}
+        entry = {'id':uuid.uuid4().hex,'date':datetime.now(timezone.utc).isoformat(),
+                 'status':'Running','config':config,'endpoint':endpoint,'model':model}
+        put('judge-pools',entry['id'],entry)
+        try:
+            import pool_runner
+            result = await pool_runner.generate(config,key,endpoint,model,float(temperature))
+            result = json.loads(json.dumps(result).replace(key,'[REDACTED]')) if key else result
+            entry.update(result,status='Completed')
+            put('judge-pools',entry['id'],entry)
+            return entry
+        except BaseException as exc:
+            entry.update(status='Failed',error='Generation failed; check model access and provider limits. Requests may be billed.')
+            put('judge-pools',entry['id'],entry)
+            if isinstance(exc,asyncio.CancelledError): raise
+            raise HTTPException(502,entry['error']) from None
 
 
 def stored_env():
@@ -75,7 +139,7 @@ def stored_env():
 def get_env_settings():
     return {'fields':env_settings.resolve(ENV_PATH, stored_env(), records('credentials')),
             'execution':'offline by default', 'applied_to_runner':True,
-            'runner_fields':['LLM_BASE_URL','LLM_API_KEY','OPENROUTER_API_KEY','AGENT_NODE_MODEL','AGENT_NODE_TEMPERATURE']}
+            'runner_fields':['LLM_BASE_URL','LLM_API_KEY','OPENROUTER_API_KEY','AGENT_NODE_MODEL','AGENT_NODE_TEMPERATURE','POOL_GEN_MODEL','POOL_GEN_TEMPERATURE']}
 
 
 @app.put('/api/settings/env')

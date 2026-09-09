@@ -1,5 +1,21 @@
 # Local backend
 
+## Генерация судей в UI
+
+Judge pool → Generate judges: отдельное подтверждение передачи design и возможных расходов.
+POST /api/judge-pools/generate использует LLM_BASE_URL, ключ выбранного сервиса,
+POOL_GEN_MODEL и POOL_GEN_TEMPERATURE. Один запрос, до 4000 output tokens,
+timeout 120 секунд, без tools/retries/Langfuse. Это отдельный UI-адаптер pool_runner.py;
+старый Python PoolGenerator не изменён и не вызывается.
+GET /api/judge-pools возвращает сохранённую историю, включая ошибки.
+Генерации сохраняются в SQLite независимо от применения. Повторное открытие бесплатно.
+Черновик редактируется перед применением. Применение заменяет nodes, judge_instructions
+и edges на граф специалистов → FINAL_AGGREGATOR. Текущая конфигурация сохраняется
+через workspace; версии дополнительно сохраняются в Judge Studio.
+judge_instructions попадают в AI-run и его snapshot. Модель судей задаётся в Design,
+модель генератора — отдельно в Settings. Автогенерация произвольного графа не подключена.
+Проверки: python -m unittest test_pool_runner test_server test_ai_runner -v.
+
 ## Настраиваемое подключение AI
 
 Settings → AI connection: LLM_BASE_URL — полный базовый URL OpenAI-совместимого
@@ -63,7 +79,7 @@ ai_runner.py строит AgentNode и PipelineBuilder из утверждённ
 
 Первый режим: Full trace, максимум 8 узлов и 100 KB JSON трассы, без tools и Langfuse.
 Один запрос на узел, без SDK/agent retries, до 1024 выходных токенов, timeout 180 секунд.
-Только один активный AI run на локальный сервер. Автогенерация pool/graph не выполняется.
+Только один активный AI run на локальный сервер. В run автогенерация pool/graph не выполняется; пул генерируется отдельным подтверждённым запросом.
 Budget target НЕ является жёстким денежным лимитом. Ограничивайте расходы лимитом ключа
 на стороне OpenRouter. Стоимость возвращается null, а не фиктивный ноль.
 После ошибки/отмены usage может быть неполным; уже отправленные запросы могут тарифицироваться.

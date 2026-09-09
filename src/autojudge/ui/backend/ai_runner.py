@@ -76,6 +76,9 @@ async def run(config, steps, key, temperature, emit, model_override=None):
             if name == 'FINAL_AGGREGATOR':
                 instructions += ('Synthesize predecessor judgments. Return ONLY a JSON object '
                                  'matching this schema, without markdown fences:\n'+config['schema'])
+            custom = config.get('judge_instructions', {}).get(name, '')
+            if custom:
+                instructions += '\nJudge-specific instructions:\n' + custom
             node = ApiNode(name=name, instructions=instructions, model=model_name,
                            api_key=key, use_tools=False)
             agent = Agent(model=model, instructions=instructions, retries=0,
