@@ -10,13 +10,10 @@ from pydantic_ai import Agent, RunUsage
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 
-from autojudge.db.db_tools import get_content_tool
 from autojudge.pipeline.types import UsageTrackingMixin
-from autojudge.utils.langfuse_utils import setup_langfuse_instrumentation
 
 load_dotenv(".env")
 
-setup_langfuse_instrumentation()
 
 AGENT_NODE_TEMPERATURE = float(os.getenv("AGENT_NODE_TEMPERATURE", "0.1"))
 print('Judge temperature = ', AGENT_NODE_TEMPERATURE)
@@ -44,6 +41,8 @@ class AgentNode(UsageTrackingMixin):
             raise RuntimeError("No API key provided")
 
     def build_agent(self) -> Agent:
+        from autojudge.utils.langfuse_utils import setup_langfuse_instrumentation
+        setup_langfuse_instrumentation()
         print('Judge model: ', self.model)
         model = OpenAIChatModel(
             self.model,
@@ -51,7 +50,10 @@ class AgentNode(UsageTrackingMixin):
             settings={"temperature": AGENT_NODE_TEMPERATURE},
         )
 
-        tools = [get_content_tool] if self.use_tools else []
+        tools = []
+        if self.use_tools:
+            from autojudge.db.db_tools import get_content_tool
+            tools = [get_content_tool]
 
         return Agent(
             name=self.name,

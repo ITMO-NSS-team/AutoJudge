@@ -29,7 +29,7 @@ class Pipeline:
         self.node_session = NodeSession()
 
         # Pipeline trace
-        self._trace: PipelineTrace
+        self._trace: Optional[PipelineTrace] = None
 
         # Compute execution levels for parallel execution
         self._execution_levels = self._compute_execution_levels()
@@ -96,7 +96,8 @@ class Pipeline:
         logger.info(f"Completed node: {node.name} (id: {node.id})")
 
         # Store usage in node for cost tracking
-        node._usage = result.usage()
+        usage = result.usage() if callable(result.usage) else result.usage
+        node._usage = usage
 
         # Store node trace
         node_trace = NodeTrace(
@@ -104,7 +105,7 @@ class Pipeline:
             node_name=node.name,
             model=node.model,
             message_history=result.all_messages(),
-            usage=result.usage(),
+            usage=usage,
         )
 
         if self._trace is not None:

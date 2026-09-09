@@ -1,16 +1,14 @@
-from dotenv import load_dotenv
+from importlib import import_module
 
-from .agent_pool import (
-    ALL_AGENTS_POOL,
-    PLANNING_POOL,
-    RESEARCH_POOL,
-    AgentPool,
-    DefaultAgents,
-)
-from .main import autojudge
-from .pipeline import AgentNode, Pipeline, PipelineBuilder
 
-load_dotenv()
+def __getattr__(name):
+    if name not in __all__:
+        raise AttributeError(name)
+    module = '.main' if name == 'autojudge' else '.pipeline' if name in (
+        'Pipeline', 'PipelineBuilder', 'AgentNode') else '.agent_pool'
+    value = getattr(import_module(module, __name__), name)
+    globals()[name] = value
+    return value
 
 
 __all__ = [
