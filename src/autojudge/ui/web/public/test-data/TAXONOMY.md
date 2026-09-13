@@ -1,11 +1,11 @@
-# Тестовая taxonomy
+# Test taxonomy
 
-Это компактный набор категорий для функциональной проверки интерфейса.
+This compact category set is intended for functional UI testing.
 
-- unsupported_claim: утверждение не подтверждается видимыми данными трассы.
-- tool_error: неверное использование инструмента или игнорирование его ошибки.
-- instruction_violation: нарушение явной инструкции пользователя.
-- insufficient_context: для проверки необходимы отсутствующие вложения или контекст.
+- unsupported_claim: a claim is not supported by visible trace evidence.
+- tool_error: a tool is used incorrectly or its error is ignored.
+- instruction_violation: an explicit user instruction is violated.
+- insufficient_context: required attachments or context are missing.
 
-Не угадывайте правильный ответ. Ссылайтесь на числовые ID шагов в preview.
-Отсутствующее изображение не является доказательством ошибки агента.
+Do not guess the correct answer. Cite numeric step IDs from the preview.
+A missing image is not evidence of an agent error.

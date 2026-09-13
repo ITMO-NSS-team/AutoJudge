@@ -9,13 +9,28 @@ import server
 
 
 class ApiTests(unittest.TestCase):
+    def test_non_windows_keyring_payload_contains_no_secret(self):
+        secret='cross-platform-test-secret'
+        with patch.object(server.credentials.sys,'platform','linux'), patch.object(
+            server.credentials,'storage_info',return_value={'name':'Linux Secret Service','available':True,'persistent':True}
+        ), patch('keyring.set_password') as save, patch('keyring.get_password',return_value=secret) as load, patch('keyring.delete_password') as remove:
+            payload=server.credentials.store('LLM_API_KEY',secret)
+            self.assertEqual(payload,{'keyring':True,'storage':'keyring'})
+            self.assertNotIn(secret,json.dumps(payload))
+            self.assertEqual(server.credentials.load('LLM_API_KEY',payload),secret)
+            server.credentials.remove('LLM_API_KEY',payload)
+            save.assert_called_once_with('AutoJudge','LLM_API_KEY',secret)
+            load.assert_called_once_with('AutoJudge','LLM_API_KEY')
+            remove.assert_called_once_with('AutoJudge','LLM_API_KEY')
+
     def test_env_settings(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(server, 'DB_PATH', Path(directory)/'test.sqlite'), patch.object(server, 'ENV_PATH', Path(directory)/'.env'), patch.dict('os.environ', {}, clear=True):
             with TestClient(server.app) as client:
                 headers={'Origin':'http://127.0.0.1:5173'}
                 path='/api/settings/env'
                 fields=client.get(path).json()['fields']
-                self.assertEqual(len(fields),25)
+                self.assertEqual(len(fields),16)
+                self.assertNotIn('MCP models',{field['group'] for field in fields})
                 values={'HF_TOKEN':'fake-token-for-offline-test','DB_PORT':'5433','AGENT_NODE_TEMPERATURE':'0.7'}
                 response=client.put(path,json={'values':values},headers=headers)
                 self.assertEqual(response.status_code,200)
@@ -59,9 +74,17 @@ class ApiTests(unittest.TestCase):
                 self.assertFalse(client.delete(path, headers=headers).json()['configured'])
                 self.assertEqual(server.records('credentials'), [])
 
+    def test_remote_origin_is_explicitly_configurable(self):
+        allowed='https://autojudge-test.ngrok-free.app'
+        with tempfile.TemporaryDirectory() as directory, patch.object(server, 'DB_PATH', Path(directory)/'test.sqlite'), patch.object(server, 'ENV_PATH', Path(directory)/'.env'), patch.dict('os.environ', {'AUTOJUDGE_ALLOWED_ORIGINS':allowed}, clear=True):
+            with TestClient(server.app) as client:
+                path='/api/settings/env'
+                self.assertEqual(client.put(path,json={'values':{'DB_PORT':'5433'}},headers={'Origin':allowed}).status_code,200)
+                self.assertEqual(client.put(path,json={'values':{'DB_PORT':'5434'}},headers={'Origin':'https://other.ngrok-free.app'}).status_code,403)
+
     def test_lifecycle(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(server, 'DB_PATH', Path(directory)/'test.sqlite'):
-            request={'config':{'nodes':['Judge','FINAL_AGGREGATOR'],'edges':[['Judge','FINAL_AGGREGATOR']],'schema':'{"type":"object"}','examples':'[]'},'steps':[{'id':1,'content':'test'}]}
+            request={'config':{'nodes':['Judge','FINAL_AGGREGATOR'],'edges':[['Judge','FINAL_AGGREGATOR']],'schema':'{"type":"object"}','examples':'[]','taxonomy':'Test taxonomy'},'steps':[{'id':1,'content':'test'}]}
             with TestClient(server.app) as client:
                 self.assertFalse(client.get('/api/health').json()['paid_calls_enabled'])
                 self.assertEqual(client.post('/api/runs',json={**request,'execution':'llm'}).status_code,403)
@@ -77,11 +100,60 @@ class ApiTests(unittest.TestCase):
                 second=client.post('/api/runs',json=request).json()
                 cancelled=client.post(f"/api/runs/{second['id']}/cancel").json()
                 self.assertEqual(cancelled['status'],'Cancelled')
-                self.assertEqual(client.put('/api/workspace',json={'traces':[{'name':'test'}]}).status_code,200)
+                self.assertEqual(client.put('/api/workspace',json={'config':request['config']}).status_code,200)
             with TestClient(server.app) as client:
                 self.assertTrue(client.get(f"/api/runs/{run['id']}").json()['archived'])
                 self.assertEqual(len(client.get('/api/runs').json()),2)
-                self.assertEqual(client.get('/api/workspace').json()['traces'][0]['name'],'test')
+                self.assertEqual(client.get('/api/workspace').json()['config']['nodes'][0],'Judge')
+
+    def test_sequential_judge_chain_levels(self):
+        config={
+            'nodes':['Evidence','Critic','FINAL_AGGREGATOR'],
+            'edges':[['Evidence','Critic'],['Critic','FINAL_AGGREGATOR']],
+            'schema':'{"type":"object"}',
+            'examples':'[]',
+            'taxonomy':'Test taxonomy',
+        }
+        with TestClient(server.app) as client:
+            response=client.post('/api/graph/validate',json=config)
+            self.assertEqual(response.status_code,200)
+            self.assertEqual(response.json()['levels'],[['Evidence'],['Critic'],['FINAL_AGGREGATOR']])
+
+    def test_graph_rejects_edge_from_missing_node(self):
+        config={
+            'nodes':['Judge','FINAL_AGGREGATOR'],
+            'edges':[['Removed judge','FINAL_AGGREGATOR']],
+            'schema':'{"type":"object"}',
+            'examples':'[]',
+            'taxonomy':'Test taxonomy',
+        }
+        with TestClient(server.app) as client:
+            self.assertEqual(client.post('/api/graph/validate',json=config).status_code,422)
+
+    def test_design_validation(self):
+        design={'objective':'Check the trace','taxonomy':'Unsupported claim','model':'z-ai/glm-5.3-flash','schema':'{"type":"object","properties":{"verdict":{"type":"string"}}}','examples':'[]'}
+        with TestClient(server.app) as client:
+            response=client.post('/api/design/validate',json=design)
+            self.assertEqual(response.status_code,200)
+            self.assertEqual(response.json()['properties'],1)
+            self.assertEqual(response.json()['taxonomy_chars'],17)
+
+    def test_model_id_validation(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(server, 'DB_PATH', Path(directory)/'test.sqlite'), patch.object(server, 'ENV_PATH', Path(directory)/'.env'):
+            with TestClient(server.app) as client:
+                headers={'Origin':'http://127.0.0.1:5173'}
+                self.assertEqual(client.put('/api/settings/env',json={'values':{'AGENT_NODE_MODEL':'z-ai/glm-5.3-flash'}},headers=headers).status_code,200)
+                self.assertEqual(client.put('/api/settings/env',json={'values':{'AGENT_NODE_MODEL':'z-ai модель'}},headers=headers).status_code,422)
+
+    def test_run_can_be_permanently_deleted(self):
+        request={'config':{'nodes':['Judge','FINAL_AGGREGATOR'],'edges':[['Judge','FINAL_AGGREGATOR']],'schema':'{"type":"object"}','examples':'[]','objective':'Check','taxonomy':'Test taxonomy'},'steps':[{'id':1,'content':'test'}]}
+        with tempfile.TemporaryDirectory() as directory, patch.object(server,'DB_PATH',Path(directory)/'test.sqlite'):
+            with TestClient(server.app) as client:
+                run=client.post('/api/runs',json=request).json()
+                with client.stream('GET',f"/api/runs/{run['id']}/events") as response:
+                    list(response.iter_lines())
+                self.assertEqual(client.delete(f"/api/runs/{run['id']}").status_code,204)
+                self.assertEqual(client.get(f"/api/runs/{run['id']}").status_code,404)
 
 
 if __name__=='__main__': unittest.main()

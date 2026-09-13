@@ -1,6 +1,7 @@
 """Allowlisted environment settings; never serialize secret values."""
 import math
 import os
+import re
 from dotenv import dotenv_values
 
 # Template defaults are suggestions; runtime defaults are documented explicitly.
@@ -11,17 +12,8 @@ FIELDS = [
     ('HF_TOKEN', 'API keys', 'secret', ''),
     ('GITHUB_TOKEN', 'API keys', 'secret', ''),
     ('E2B_API_KEY', 'API keys', 'secret', ''),
-    ('DEFAULT_META_MODEL', 'Models', 'text', 'anthropic/claude-sonnet-4'),
     ('AGENT_NODE_MODEL', 'Models', 'text', 'google/gemini-2.5-flash'),
     ('AGENT_NODE_TEMPERATURE', 'Models', 'temperature', '0.1'),
-    ('POOL_GEN_MODEL', 'Models', 'text', 'deepseek/deepseek-v4-pro'),
-    ('POOL_GEN_TEMPERATURE', 'Models', 'temperature', '0.3'),
-    ('GRAPH_GEN_MODEL', 'Models', 'text', 'google/gemini-2.5-flash'),
-    ('AUDIO_MODEL', 'MCP models', 'text', 'google/gemini-2.5-flash'),
-    ('IMAGE_MODEL', 'MCP models', 'text', 'google/gemini-2.5-flash'),
-    ('VIDEO_MODEL', 'MCP models', 'text', 'google/gemini-2.5-flash'),
-    ('BROWSERUSE_MODEL', 'MCP models', 'text', 'google/gemini-2.5-flash'),
-    ('MASEVAL_DEFAULT_MODEL', 'MCP models', 'text', 'google/gemini-2.5-flash'),
     ('LANGFUSE_PUBLIC_KEY', 'Langfuse', 'secret', ''),
     ('LANGFUSE_SECRET_KEY', 'Langfuse', 'secret', ''),
     ('LANGFUSE_HOST', 'Langfuse', 'url', ''),
@@ -32,6 +24,12 @@ FIELDS = [
     ('DB_PORT', 'PostgreSQL', 'port', '5432'),
 ]
 
+MODEL_ID = re.compile(r'^[\x21-\x7e]{1,200}$')
+
+
+def valid_model_id(value):
+    return isinstance(value, str) and bool(MODEL_ID.fullmatch(value))
+
 
 def resolve(path, stored, legacy):
     values = dotenv_values(path, interpolate=False) if path.exists() else {}
@@ -41,9 +39,13 @@ def resolve(path, stored, legacy):
         source = 'process' if name in os.environ else '.env' if values.get(name) else 'default'
         if name in stored:
             source = 'saved'
-            value = stored[name].get('value', '') if kind != 'secret' else stored[name].get('ciphertext', '')
+            value = stored[name].get('value', '') if kind != 'secret' else (
+                stored[name].get('ciphertext') or stored[name].get('keyring') or '')
         elif name == 'OPENROUTER_API_KEY' and legacy:
             source, value = 'saved', 'encrypted'
+        if name == 'AGENT_NODE_MODEL' and not valid_model_id(value):
+            value = values.get(name) or default
+            source = '.env' if values.get(name) else 'default'
         result.append({'name':name, 'group':group, 'kind':kind, 'source':source,
                        'configured':bool(value), 'value':None if kind=='secret' else value,
                        'overridden':name in stored})
@@ -56,6 +58,8 @@ def validate(name, value):
         raise ValueError('Invalid setting')
     if kind == 'temperature' and (not math.isfinite(float(value)) or not 0 <= float(value) <= 2):
         raise ValueError('Temperature must be between 0 and 2')
+    if name == 'AGENT_NODE_MODEL' and not valid_model_id(value):
+        raise ValueError('Model ID must contain printable ASCII characters without spaces')
     if kind == 'port' and (not value.isdecimal() or not 1 <= int(value) <= 65535):
         raise ValueError('Port must be between 1 and 65535')
     if kind == 'url' and value:

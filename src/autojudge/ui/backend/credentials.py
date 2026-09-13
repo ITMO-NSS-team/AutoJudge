@@ -1,8 +1,10 @@
-"""Windows user-scoped DPAPI protection. Never fall back to plaintext."""
+"""Cross-platform OS credential storage. Never fall back to plaintext."""
 import base64
 import ctypes
 import sys
 from ctypes import wintypes
+
+SERVICE = 'AutoJudge'
 
 
 class Blob(ctypes.Structure):
@@ -39,3 +41,58 @@ def encrypt(secret: str) -> str:
 
 def decrypt(ciphertext: str) -> str:
     return transform(base64.b64decode(ciphertext), decrypt=True).decode('utf-8')
+
+
+def storage_info():
+    if sys.platform == 'win32':
+        return {'name':'Windows DPAPI','available':True,'persistent':True}
+    name = 'macOS Keychain' if sys.platform == 'darwin' else 'Linux Secret Service'
+    try:
+        import keyring
+        backend = keyring.get_keyring()
+        available = float(getattr(backend, 'priority', 0)) > 0
+    except Exception:
+        available = False
+    return {'name':name if available else 'Environment only','available':available,'persistent':available}
+
+
+def store(name: str, secret: str):
+    if sys.platform == 'win32':
+        return {'ciphertext':encrypt(secret),'storage':'dpapi'}
+    if not storage_info()['available']:
+        raise RuntimeError('Persistent OS credential storage is unavailable')
+    try:
+        import keyring
+        keyring.set_password(SERVICE, name, secret)
+    except Exception as exc:
+        raise RuntimeError('Persistent OS credential storage is unavailable') from exc
+    return {'keyring':True,'storage':'keyring'}
+
+
+def load(name: str, payload: dict) -> str:
+    ciphertext=payload.get('ciphertext','')
+    if ciphertext:
+        return decrypt(ciphertext)
+    if not payload.get('keyring'):
+        return ''
+    try:
+        import keyring
+        return keyring.get_password(SERVICE,name) or ''
+    except Exception as exc:
+        raise RuntimeError('Persistent OS credential storage is unavailable') from exc
+
+
+def remove(name: str, payload: dict | None = None):
+    if not payload or not payload.get('keyring'):
+        return
+    try:
+        import keyring
+        keyring.delete_password(SERVICE,name)
+    except keyring.errors.PasswordDeleteError:
+        pass
+    except Exception as exc:
+        raise RuntimeError('Persistent OS credential storage is unavailable') from exc
+
+
+def configured(payload: dict) -> bool:
+    return bool(payload.get('ciphertext') or payload.get('keyring')) and not payload.get('disabled',False)

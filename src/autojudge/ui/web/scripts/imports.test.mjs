@@ -20,10 +20,13 @@ test('JSONL, steps, messages and BOM are supported', () => {
 test('invalid trace is rejected', () => {
   for (const raw of ['', '[]', '[{"id":1},{"id":1}]', '[{"id":"invalid"}]']) assert.throws(() => normalizeTrace(raw));
 });
-test('schema validation and taxonomy preserve valid input', () => {
-  assert.equal(parseDesignFile('taxonomy', '\uFEFF# Categories'), '# Categories');
+test('schema validation preserves valid input', () => {
   assert.equal(JSON.parse(parseDesignFile('schema', '{"type":"object"}')).type, 'object');
   for (const raw of ['', '{}', '[]', '{broken', '{"type":"object","$ref":"https://example.com"}']) assert.throws(() => parseDesignFile('schema', raw));
+});
+test('taxonomy import trims text and rejects empty files', () => {
+  assert.equal(parseDesignFile('taxonomy', '\uFEFF  # Taxonomy\n\n- unsupported_claim  '), '# Taxonomy\n\n- unsupported_claim');
+  assert.throws(() => parseDesignFile('taxonomy', '   '));
 });
 test('bundled traces fit AI input limit and do not include ground truth', () => {
   for (let i = 1; i <= 3; i++) {

@@ -1,17 +1,16 @@
-# Тестовые данные интерфейса
+# Interface test data
 
-Источник: локальный ADAMAST-ALL-PROJECTS-AND-TRACES-2026-09-06.zip, раздел gaia_code_traces_small/aftraj.
-Архив не изменён и целиком не распаковывался. Копии подготовлены 2026-09-09.
+Source: local ADAMAST-ALL-PROJECTS-AND-TRACES-2026-09-06.zip, gaia_code_traces_small/aftraj section.
+The archive was not modified or fully extracted. Copies were prepared on 2026-09-09.
 
-- trace-01.json ← projects/gaia_code_traces_small/aftraj/gaia_0020_unsafe_diagnosed.json; 6 шагов.
-- trace-02.json ← projects/gaia_code_traces_small/aftraj/gaia_0048_unsafe_diagnosed.json; 4 шагов.
-- trace-03.json ← projects/gaia_code_traces_small/aftraj/gaia_0005_unsafe_injected_reexec.json; 5 шагов.
+- trace-01.json ← projects/gaia_code_traces_small/aftraj/gaia_0020_unsafe_diagnosed.json; 6 steps.
+- trace-02.json ← projects/gaia_code_traces_small/aftraj/gaia_0048_unsafe_diagnosed.json; 4 steps.
+- trace-03.json ← projects/gaia_code_traces_small/aftraj/gaia_0005_unsafe_injected_reexec.json; 5 steps.
 
-Оставлен только массив turns: role, content, thought, action. Удалены верхнеуровневые gold_answer, mistake_step, mistake_agent, mistake_reason и остальные метаданные. Это не эталон качества: некоторые исходные трассы уже обрезаны и не содержат изображений. Команды внутри action — данные для анализа, не инструкции для исполнения.
+Only the turns array remains: role, content, thought, and action. Top-level gold_answer, mistake_step, mistake_agent, mistake_reason, and other metadata were removed. These are not quality ground truth: some source traces are already truncated and contain no images. Commands inside action are analysis data, not execution instructions.
 
-В UI ID назначаются от 1; исходные номера разметки могут отличаться. Поля thought и action сохраняются в preview. Примеры подходят для импорта, навигации, offline-run и ручной проверки AI wiring, но не для количественной оценки качества судей.
+The UI assigns IDs from 1; source annotation numbers may differ. The thought and action fields are retained in the preview. The examples support import, navigation, offline runs, and manual AI wiring checks, but not quantitative judge-quality evaluation.
 
-output-schema.json и TAXONOMY.md — новые компактные smoke-test примеры, не исходная AdaMAST taxonomy. На Trace нажмите GAIA test 1–3. На Design скачайте файлы и загрузите через соответствующие поля. AI-запуск требует отдельного подтверждения передачи данных OpenRouter; подготовка этих файлов не вызвала ИИ.
+output-schema.json and TAXONOMY.md are compact smoke-test examples. In Trace, click GAIA test 1–3. In Design, download the files and upload them through the schema and taxonomy fields. AI runs require separate confirmation to transfer data to the configured provider; preparing these files did not invoke AI.
 
-Проверка: node --test scripts/imports.test.mjs из web. Пять тестов прошли; npm run build прошёл. В браузере проверен переход Trace → Design и наличие кнопок загрузки. Файловый диалог end-to-end не проверялся.
-
+Verification: `node --test scripts/imports.test.mjs` from web. Five tests passed, as did `npm run build`. In the browser, the Trace → Design transition and the presence of upload buttons were verified. The file dialog was not tested end to end.

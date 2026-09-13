@@ -1,6 +1,7 @@
 """Local API with free offline validation and explicitly confirmed AI runs."""
 import asyncio
 import json
+import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -52,10 +53,6 @@ tasks = {}
 
 @asynccontextmanager
 async def lifespan(app):
-    for pool in records('judge-pools'):
-        if pool['status'] == 'Running':
-            pool.update(status='Interrupted',error='Server restarted; request may have been billed')
-            put('judge-pools',pool['id'],pool)
     for run in records('runs'):
         if run['status'] == 'Running':
             run.update(status='Interrupted', verdict='Server restarted; inspect partial outputs; AI requests may be billed')
@@ -67,66 +64,6 @@ async def lifespan(app):
 
 
 app = FastAPI(title='AutoJudge local API', lifespan=lifespan)
-pool_lock = asyncio.Lock()
-
-
-class PoolRequest(BaseModel):
-    objective: str = Field(min_length=1, max_length=20000)
-    taxonomy: str = Field(min_length=1, max_length=50000)
-    schema_text: str = Field(min_length=1, max_length=30000)
-    examples: str = Field(default='[]', max_length=30000)
-    confirm_paid: bool = False
-
-
-@app.get('/api/judge-pools')
-def list_pools():
-    return records('judge-pools')
-
-
-@app.post('/api/judge-pools/generate')
-async def generate_pool(body: PoolRequest, request: Request):
-    check_credential_origin(request)
-    if not body.confirm_paid:
-        raise HTTPException(403, 'Explicit AI generation confirmation required')
-    if pool_lock.locked():
-        raise HTTPException(409, 'Pool generation is already running')
-    try:
-        from jsonschema import Draft202012Validator
-        schema = json.loads(body.schema_text)
-        Draft202012Validator.check_schema(schema)
-        if not isinstance(schema,dict) or schema.get('type') != 'object' or not isinstance(json.loads(body.examples),list):
-            raise ValueError()
-    except Exception:
-        raise HTTPException(422, 'Invalid output schema or examples')
-    async with pool_lock:
-        try:
-            key, _, _, endpoint = ai_settings()
-            fields = {f['name']:f['value'] for f in get_env_settings()['fields']}
-            model = fields['POOL_GEN_MODEL'].strip()
-            temperature = fields['POOL_GEN_TEMPERATURE']
-            env_settings.validate('POOL_GEN_TEMPERATURE',temperature)
-            if not model: raise ValueError()
-        except Exception:
-            raise HTTPException(422, 'Check AI connection and pool generation settings')
-        from urllib.parse import urlparse
-        if not key and urlparse(endpoint).hostname not in ('localhost','127.0.0.1','::1'):
-            raise HTTPException(422,'Set the provider API key in Settings')
-        config = {'objective':body.objective,'taxonomy':body.taxonomy,'schema':body.schema_text,'examples':body.examples}
-        entry = {'id':uuid.uuid4().hex,'date':datetime.now(timezone.utc).isoformat(),
-                 'status':'Running','config':config,'endpoint':endpoint,'model':model}
-        put('judge-pools',entry['id'],entry)
-        try:
-            import pool_runner
-            result = await pool_runner.generate(config,key,endpoint,model,float(temperature))
-            result = json.loads(json.dumps(result).replace(key,'[REDACTED]')) if key else result
-            entry.update(result,status='Completed')
-            put('judge-pools',entry['id'],entry)
-            return entry
-        except BaseException as exc:
-            entry.update(status='Failed',error='Generation failed; check model access and provider limits. Requests may be billed.')
-            put('judge-pools',entry['id'],entry)
-            if isinstance(exc,asyncio.CancelledError): raise
-            raise HTTPException(502,entry['error']) from None
 
 
 def stored_env():
@@ -138,8 +75,9 @@ def stored_env():
 @app.get('/api/settings/env')
 def get_env_settings():
     return {'fields':env_settings.resolve(ENV_PATH, stored_env(), records('credentials')),
+            'secret_storage':credentials.storage_info(),
             'execution':'offline by default', 'applied_to_runner':True,
-            'runner_fields':['LLM_BASE_URL','LLM_API_KEY','OPENROUTER_API_KEY','AGENT_NODE_MODEL','AGENT_NODE_TEMPERATURE','POOL_GEN_MODEL','POOL_GEN_TEMPERATURE']}
+            'runner_fields':['LLM_BASE_URL','LLM_API_KEY','OPENROUTER_API_KEY','AGENT_NODE_MODEL','AGENT_NODE_TEMPERATURE']}
 
 
 @app.put('/api/settings/env')
@@ -160,25 +98,30 @@ async def save_env_settings(request: Request):
         updates={}
         for name,value in values.items():
             kind=env_settings.validate(name,value)
-            updates[name]={'ciphertext':credentials.encrypt(value) if value else ''} if kind=='secret' else {'value':value}
+            updates[name]=credentials.store(name,value) if kind=='secret' and value else {'disabled':True} if kind=='secret' else {'value':value}
     except (ValueError,TypeError,StopIteration):
         raise HTTPException(422,'Invalid settings: check names, temperature (0–2), port (1–65535), and URL')
     except RuntimeError:
         raise HTTPException(503,'Encrypted credential storage unavailable')
     with connect() as db:
         for name in reset:
+            credentials.remove(name,stored_env().get(name))
             db.execute('DELETE FROM records WHERE kind=? AND id=?',('env',name))
             if name=='OPENROUTER_API_KEY':
                 db.execute('DELETE FROM records WHERE kind=? AND id=?',('credentials','openrouter'))
         for name,value in updates.items():
+            if value.get('disabled'):
+                credentials.remove(name,stored_env().get(name))
             db.execute('INSERT OR REPLACE INTO records VALUES (?,?,?)',('env',name,json.dumps(value)))
     return get_env_settings()
 
 
 def credential_status():
     field = next(f for f in get_env_settings()['fields'] if f['name']=='OPENROUTER_API_KEY')
+    storage=credentials.storage_info()
     return {'provider': 'openrouter', 'configured': field['configured'],
-            'storage': 'Windows DPAPI', 'verified': False,
+            'storage': storage['name'], 'storage_available':storage['available'],
+            'persistent_storage':storage['persistent'],
             'paid_calls_enabled': False}
 
 
@@ -190,8 +133,13 @@ def read_credential_status():
 def check_credential_origin(request: Request):
     allowed = {'http://127.0.0.1:5173', 'http://localhost:5173',
                'http://127.0.0.1:8000', 'http://localhost:8000'}
+    allowed.update(
+        origin.strip().rstrip('/')
+        for origin in os.environ.get('AUTOJUDGE_ALLOWED_ORIGINS', '').split(',')
+        if origin.strip().startswith('https://') and len(origin.strip()) <= 2048
+    )
     if request.headers.get('origin') not in allowed:
-        raise HTTPException(403, 'Credential changes require a local application origin')
+        raise HTTPException(403, 'This action requires an approved application origin')
 
 
 @app.put('/api/credentials/openrouter')
@@ -214,20 +162,21 @@ async def set_credential(request: Request):
     except (ValueError, TypeError):
         raise HTTPException(422, 'Enter a key of 16–4096 characters without whitespace')
     try:
-        encrypted = credentials.encrypt(secret)
+        payload = credentials.store('OPENROUTER_API_KEY',secret)
     except RuntimeError:
         raise HTTPException(503, 'Encrypted credential storage unavailable')
-    put('credentials', 'openrouter', {'ciphertext': encrypted})
-    put('env', 'OPENROUTER_API_KEY', {'ciphertext': encrypted})
+    put('credentials', 'openrouter', payload)
+    put('env', 'OPENROUTER_API_KEY', payload)
     return credential_status()
 
 
 @app.delete('/api/credentials/openrouter')
 def delete_credential(request: Request):
     check_credential_origin(request)
+    credentials.remove('OPENROUTER_API_KEY',stored_env().get('OPENROUTER_API_KEY'))
     with connect() as db:
         db.execute('DELETE FROM records WHERE kind=? AND id=?', ('credentials', 'openrouter'))
-        db.execute('INSERT OR REPLACE INTO records VALUES (?,?,?)', ('env','OPENROUTER_API_KEY',json.dumps({'ciphertext':''})))
+        db.execute('INSERT OR REPLACE INTO records VALUES (?,?,?)', ('env','OPENROUTER_API_KEY',json.dumps({'disabled':True})))
     return credential_status()
 
 
@@ -239,15 +188,13 @@ class RunRequest(BaseModel):
 
 
 def ai_settings():
-    import os
     from dotenv import dotenv_values
     stored=stored_env()
     env=dotenv_values(ENV_PATH,interpolate=False) if ENV_PATH.exists() else {}
     if 'OPENROUTER_API_KEY' in stored:
-        ciphertext=stored['OPENROUTER_API_KEY'].get('ciphertext','')
-        key=credentials.decrypt(ciphertext) if ciphertext else ''
+        key=credentials.load('OPENROUTER_API_KEY',stored['OPENROUTER_API_KEY'])
     elif records('credentials'):
-        key=credentials.decrypt(records('credentials')[0]['ciphertext'])
+        key=credentials.load('OPENROUTER_API_KEY',records('credentials')[0])
     else:
         key=os.environ.get('OPENROUTER_API_KEY',env.get('OPENROUTER_API_KEY') or '')
     fields={f['name']:f['value'] for f in get_env_settings()['fields']}
@@ -256,8 +203,7 @@ def ai_settings():
     endpoint = fields['LLM_BASE_URL'].rstrip('/')
     env_settings.validate('LLM_BASE_URL', endpoint)
     if 'LLM_API_KEY' in stored:
-        ciphertext = stored['LLM_API_KEY'].get('ciphertext', '')
-        key = credentials.decrypt(ciphertext) if ciphertext else ''
+        key = credentials.load('LLM_API_KEY',stored['LLM_API_KEY'])
     elif 'LLM_API_KEY' in os.environ or env.get('LLM_API_KEY'):
         key = os.environ.get('LLM_API_KEY', env.get('LLM_API_KEY') or '')
     elif endpoint != 'https://openrouter.ai/api/v1':
@@ -271,8 +217,10 @@ def validate_ai(request):
         raise HTTPException(422,'AI execution currently requires Full trace')
     if len(config['nodes'])>8 or len(json.dumps(request.steps))>100000:
         raise HTTPException(422,'First AI runner supports at most 8 nodes and 100 KB of trace JSON')
-    if not config.get('objective','').strip() or not config.get('taxonomy','').strip():
-        raise HTTPException(422,'Objective and taxonomy are required')
+    if not config.get('objective','').strip():
+        raise HTTPException(422,'Objective is required')
+    if not isinstance(config.get('taxonomy'),str) or not config['taxonomy'].strip():
+        raise HTTPException(422,'Taxonomy is required')
     schema=json.loads(config['schema'])
     def has_reference(obj):
         if isinstance(obj,dict): return any(k in ('$ref','$dynamicRef','$recursiveRef') or has_reference(v) for k,v in obj.items())
@@ -282,8 +230,8 @@ def validate_ai(request):
     try: Draft202012Validator.check_schema(schema)
     except Exception: raise HTTPException(422,'Invalid output JSON schema')
     model=config.get('model','').strip()
-    if len(model) > 256:
-        raise HTTPException(422,'Model ID is too long')
+    if model and not env_settings.valid_model_id(model):
+        raise HTTPException(422,'Model ID must contain printable ASCII characters without spaces')
 
 
 async def execute_ai(key, secret, temperature):
@@ -323,6 +271,8 @@ async def execute_ai(key, secret, temperature):
 
 
 def validate(config):
+    if not isinstance(config.get('taxonomy'),str) or not config['taxonomy'].strip():
+        raise HTTPException(422,'Taxonomy is required')
     nodes = config.get('nodes', [])
     edges = config.get('edges', [])
     if not nodes or len(nodes) > 100 or any(not isinstance(n,str) or not n.strip() for n in nodes) or len(set(nodes)) != len(nodes) or 'FINAL_AGGREGATOR' not in nodes:
@@ -379,6 +329,33 @@ def graph_validate(config: dict):
     return {'valid':True,'levels':validate(config)}
 
 
+@app.post('/api/design/validate')
+def design_validate(config: dict):
+    objective=config.get('objective','')
+    if not isinstance(objective,str) or not objective.strip():
+        raise HTTPException(422,'Objective is required')
+    taxonomy=config.get('taxonomy','')
+    if not isinstance(taxonomy,str) or not taxonomy.strip():
+        raise HTTPException(422,'Taxonomy is required')
+    if not env_settings.valid_model_id(config.get('model','')):
+        raise HTTPException(422,'Model ID must contain printable ASCII characters without spaces')
+    try:
+        schema=json.loads(config.get('schema',''))
+        examples=json.loads(config.get('examples','[]'))
+        from jsonschema import Draft202012Validator
+        Draft202012Validator.check_schema(schema)
+        if not isinstance(schema,dict) or schema.get('type')!='object' or not isinstance(examples,list):
+            raise ValueError()
+    except Exception:
+        raise HTTPException(422,'Use a valid object JSON Schema and a JSON array of examples')
+    def has_reference(obj):
+        if isinstance(obj,dict): return any(k in ('$ref','$dynamicRef','$recursiveRef') or has_reference(v) for k,v in obj.items())
+        return isinstance(obj,list) and any(has_reference(v) for v in obj)
+    if has_reference(schema):
+        raise HTTPException(422,'Schema references are not supported by the runner')
+    return {'valid':True,'taxonomy_chars':len(taxonomy.strip()),'properties':len(schema.get('properties',{})),'examples':len(examples)}
+
+
 async def execute(key, levels):
     try:
         for index, level in enumerate(levels):
@@ -391,7 +368,7 @@ async def execute(key, levels):
             for n in level:
                 run['outputs'][n]={'status':'Completed','execution':'offline','message':'Input and dependencies accepted; no AI judgment','steps':len(run['steps'])}
             put('runs',key,run)
-        run.update(status='Completed',verdict='Offline validation completed — no AI judgment',phase=3)
+        run.update(status='Completed',verdict='Dry run completed — structure valid, no AI judgment',phase=3)
         put('runs',key,run)
     except asyncio.CancelledError:
         run=get_run(key)
@@ -400,7 +377,7 @@ async def execute(key, levels):
         raise
     except Exception:
         run=get_run(key)
-        run.update(status='Failed',verdict='Offline executor failed')
+        run.update(status='Failed',verdict='Dry run executor failed')
         put('runs',key,run)
     finally:
         tasks.pop(key,None)
@@ -433,14 +410,15 @@ async def create_run(request: RunRequest, http_request: Request):
             request.config['model']=default_model
         if not request.config['model']:
             raise HTTPException(422,'Set the provider model ID in AGENT_NODE_MODEL')
+        if not env_settings.valid_model_id(request.config['model']):
+            raise HTTPException(422,'Model ID must contain printable ASCII characters without spaces')
         request.config['applied_base_url']=endpoint
         request.config['applied_temperature']=temperature
         request.config['max_output_tokens']=1024
-        request.config['dollar_budget_enforced']=False
         try: import ai_runner
         except ImportError: raise HTTPException(503,'Install backend AI dependencies before running')
     key=uuid.uuid4().hex
-    run={'id':key,'date':datetime.now(timezone.utc).isoformat(),'status':'Running','config':request.config,'steps':request.steps,'verdict':'Pending offline validation','phase':0,'execution':'offline','usage':{'calls':0,'tokens':0,'cost':0},'outputs':{}}
+    run={'id':key,'date':datetime.now(timezone.utc).isoformat(),'status':'Running','config':request.config,'steps':request.steps,'verdict':'Pending dry run','phase':0,'execution':'offline','usage':{'calls':0,'tokens':0,'cost':0},'outputs':{}}
     put('runs',key,run)
     if request.execution=='ai':
         run.update(execution='ai',verdict='Pending AI evaluation',usage={'calls':0,'tokens':0,'cost':None})
@@ -472,6 +450,15 @@ def archive(key: str, body: dict):
     return run
 
 
+@app.delete('/api/runs/{key}', status_code=204)
+def delete_run(key: str):
+    run=get_run(key)
+    if run['status']=='Running' or key in tasks:
+        raise HTTPException(409,'Cancel the running evaluation before deleting it')
+    with connect() as db:
+        db.execute('DELETE FROM records WHERE kind=? AND id=?',('runs',key))
+
+
 @app.get('/api/runs/{key}/events')
 async def events(key: str):
     get_run(key)
@@ -495,6 +482,6 @@ def workspace():
 
 @app.put('/api/workspace')
 def save_workspace(body: dict):
-    allowed={k:body[k] for k in ('config','versions','traces','settings') if k in body}
+    allowed={k:body[k] for k in ('config','settings') if k in body}
     put('workspace','current',allowed)
     return {'saved':True}
