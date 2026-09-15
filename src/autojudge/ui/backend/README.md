@@ -25,7 +25,7 @@ Secrets use Windows DPAPI, macOS Keychain, or Linux Secret Service through
 
 For a temporary authenticated tunnel, set `AUTOJUDGE_ALLOWED_ORIGINS` to the
 exact external HTTPS origin. Multiple origins are comma-separated. This extends
-origin checks for settings and confirmed AI runs; never use a wildcard.
+origin checks for settings and AI runs; never use a wildcard.
 
 ## Evaluation contract
 
@@ -35,8 +35,8 @@ origin checks for settings and confirmed AI runs; never use a wildcard.
 - Output is checked against an object JSON Schema.
 - Few-shot examples are an optional JSON array.
 - Dry run validates structure without AI requests.
-- AI run requires local origin and explicit paid-call confirmation.
-- One AI run at a time, up to eight nodes and 100 KB of trace JSON.
+- AI run requires an allowed origin and configured provider credentials.
+- One AI run at a time, with up to eight nodes. Trace size is not artificially limited by the application.
 
 ## API
 

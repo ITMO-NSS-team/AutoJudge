@@ -4,8 +4,6 @@ import { GitFork, Layers3 } from "lucide-react";
 type GraphConfig = { nodes: string[]; edges: string[][] };
 type Point = { x: number; y: number };
 
-const STORAGE_KEY = "aj-graph-layout-v1";
-
 function executionLevels(config: GraphConfig) {
   const incoming = Object.fromEntries(config.nodes.map((node) => [node, 0]));
   const children = Object.fromEntries(config.nodes.map((node) => [node, [] as string[]]));
@@ -31,18 +29,9 @@ function executionLevels(config: GraphConfig) {
   return levels;
 }
 
-function loadPositions(): Record<string, Point> {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") as Record<string, Point>;
-  } catch {
-    return {};
-  }
-}
-
 export default function PipelineGraph({ config }: { config: GraphConfig }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(900);
-  const positions = useMemo(loadPositions, []);
   const levels = useMemo(() => executionLevels(config), [config.nodes, config.edges]);
   const compact = width < 640;
   const nodeWidth = compact ? Math.max(190, width - 32) : 190;
@@ -79,7 +68,7 @@ export default function PipelineGraph({ config }: { config: GraphConfig }) {
     return result;
   }, [compact, height, levels, nodeWidth, orderedNodes, rowHeight, width]);
 
-  const pointFor = (node: string) => positions[node] ?? defaults[node] ?? { x: 16, y: 16 };
+  const pointFor = (node: string) => defaults[node] ?? { x: 16, y: 16 };
 
   return (
     <div className="pipeline-graph-wrap">

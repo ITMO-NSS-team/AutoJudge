@@ -94,7 +94,7 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
 
 
 class IntegrationTests(unittest.TestCase):
-    def test_api_real_pipeline_and_confirmation(self):
+    def test_api_real_pipeline_requires_allowed_origin(self):
         real_run=ai_runner.run
         async def local_run(config,steps,key,temp,emit):
             return await real_run(config,steps,key,temp,emit,FunctionModel(answer))
@@ -102,8 +102,6 @@ class IntegrationTests(unittest.TestCase):
             with TestClient(server.app) as client:
                 data={'config':CONFIG,'steps':STEPS,'execution':'ai'}
                 headers={'Origin':'http://127.0.0.1:5173'}
-                self.assertEqual(client.post('/api/runs',json=data,headers=headers).status_code,403)
-                data['confirm_paid']=True
                 self.assertEqual(client.post('/api/runs',json=data).status_code,403)
                 result=client.post('/api/runs',json=data,headers=headers)
                 self.assertEqual(result.status_code,201,result.text)

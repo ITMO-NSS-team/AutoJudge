@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { exampleOutputSchema, exampleTaxonomy } from '../src/designTemplate.ts';
 import { parseDesignFile } from '../src/imports.ts';
 
@@ -14,4 +15,10 @@ test('example template uses final attribution contract, not specialist score', (
 test('example taxonomy contains judge and final attribution guidance', () => {
   assert.match(exampleTaxonomy, /Search integrity/);
   assert.match(exampleTaxonomy, /Final attribution/);
+});
+test('judge model is selected only through environment settings', () => {
+  const workspace = readFileSync(new URL('../src/Workspace.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(workspace, /label="Judge model"/);
+  assert.doesNotMatch(workspace, /model:\s*"openrouter\/auto"/);
+  assert.match(workspace, /AGENT_NODE_MODEL/);
 });

@@ -1,162 +1,233 @@
-# AutoJudge Research Deployment Plan
+# AutoJudge Hugging Face Deployment Plan
 
 ## Goal
 
-Deploy AutoJudge as a small shared research application with a stable HTTPS URL,
-persistent run history, and controlled access, without turning it into a
-multi-tenant SaaS product.
+Deploy AutoJudge as a small shared research application in a Hugging Face Docker
+Space. The deployment must provide one stable HTTPS URL, controlled access,
+persistent run history, and server-side provider credentials without turning the
+project into a multi-tenant SaaS product.
 
-## Target architecture
+## Recommended target
 
-Use one repository, one Docker image, one application instance, and one
-persistent volume.
+- Hugging Face Docker Space.
+- CPU Basic hardware; model inference remains on the configured external provider.
+- One container, one Uvicorn worker, and one shared research workspace.
+- FastAPI serves both `/api/*` and the production React bundle.
+- SQLite lives under `AUTOJUDGE_DATA_DIR` on an attached Storage Bucket.
+- Provider configuration is injected through Hugging Face Secrets.
 
 ```text
 Browser
    |
-   | HTTPS + Basic Auth
+   | HTTPS
    v
-FastAPI
-   |- React static files
-   |- API and Server-Sent Events
-   |- AutoJudge AI pipeline
-   `- SQLite on a persistent volume
+Hugging Face Docker Space :7860
+   `- FastAPI / Uvicorn (one worker)
+      |- React static files and SPA fallback
+      |- REST API and Server-Sent Events
+      |- AutoJudge AI pipeline
+      `- SQLite -> /data/autojudge/workspace.sqlite3
 ```
-
-The React application is built during the Docker build and served by FastAPI.
-This keeps the UI and API on one origin and removes the production dependency on
-the Vite development server.
 
 ## Deliberate simplifications
 
-- One shared research workspace.
-- One shared provider configuration managed by the project owner.
+- One shared workspace for a small trusted research group.
+- One provider configuration managed by the project owner.
 - One AI evaluation at a time.
 - SQLite instead of Postgres.
-- In-process background execution instead of Redis and a separate worker.
-- Basic Auth instead of user registration, roles, and organizations.
-- One application instance with horizontal scaling disabled.
+- In-process run execution instead of Redis and a separate worker.
+- No registration, organizations, roles, or horizontal scaling.
 
-These constraints are acceptable for a small trusted research group. A server
-restart may interrupt an active AI evaluation; the existing recovery behavior
-must mark it as interrupted rather than silently leaving it running.
+A container restart may interrupt an active AI evaluation. Recovery must mark the
+run as interrupted instead of leaving it in a running state.
+
+## Access model
+
+Choose one of these before staging:
+
+1. **Private Space:** only the owner and invited Hugging Face collaborators can
+   open the application. This is the preferred starting point.
+2. **Protected or public application with Basic Auth:** use this only when testers
+   must access the app without Hugging Face accounts. Protect the complete UI and
+   API, not only the Settings page.
+
+If application-level Basic Auth is enabled, read its values only from
+`AUTOJUDGE_USERNAME` and `AUTOJUDGE_PASSWORD` Secrets. Exempt `/api/health` only
+when Hugging Face requires an unauthenticated liveness endpoint.
 
 ## Required implementation
 
-### 1. Reproducible container
+### 1. Single-origin production server
 
-- Add a multi-stage `Dockerfile`.
-- Build React with Node in the first stage.
-- Install the minimal Python runtime dependencies in the second stage.
-- Copy the frontend build into the runtime image.
-- Run FastAPI with one Uvicorn worker as a non-root user.
-- Bind to the platform-provided `PORT` on `0.0.0.0`.
-- Add a container health check.
-- Pin frontend dependencies and commit lock files.
+- Build React during the Docker image build.
+- Copy `src/autojudge/ui/web/dist` into the Python runtime image.
+- Serve the frontend assets and SPA fallback from FastAPI.
+- Keep `/api/*` and Server-Sent Events on the same origin.
+- Do not run Vite or use its proxy and `allowedHosts` settings in production.
+- Listen on `0.0.0.0:7860`, matching the Space `app_port` metadata.
 
-### 2. Single-origin application
+### 2. Reproducible Docker image
 
-- Serve the React build and SPA fallback from FastAPI.
-- Keep `/api` routes on the same origin.
-- Preserve Server-Sent Events for run progress.
-- Remove production reliance on Vite proxy and development `allowedHosts`.
+- Add a multi-stage root `Dockerfile` with Node and Python build stages.
+- Install only runtime Python packages in the final stage.
+- Run the application as a non-root user.
+- Start exactly one Uvicorn worker.
+- Add a Docker health check for `/api/health`.
+- Keep dependency lock files committed and never copy `.env`, databases, logs, or
+  development caches into the image.
 
 ### 3. Persistent research data
 
-- Add `AUTOJUDGE_DATA_DIR`, defaulting to the existing local `.autojudge`
-  directory.
-- Store the deployment database at
-  `${AUTOJUDGE_DATA_DIR}/workspace.sqlite3`.
-- Mount the hosting volume at `/data` and set `AUTOJUDGE_DATA_DIR=/data`.
-- Keep a single application instance to avoid concurrent SQLite writers across
-  machines.
-- Document database backup and restore commands.
+- Add `AUTOJUDGE_DATA_DIR` support to the backend.
+- Preserve the current local `.autojudge` directory as the default.
+- In the Space, set `AUTOJUDGE_DATA_DIR=/data/autojudge`.
+- Attach a writable Hugging Face Storage Bucket at `/data`.
+- Store `workspace.sqlite3` and any future durable artifacts only below that path.
+- Keep one container instance and one worker to avoid multiple SQLite writers.
+- Document and test SQLite backup and restore.
 
-### 4. Authentication and access
+The ordinary Space filesystem is ephemeral. Do not claim persistence until data
+has survived an actual Space restart with the bucket attached.
 
-- Protect the complete UI and API with Basic Auth over HTTPS.
-- Read credentials only from `AUTOJUDGE_USERNAME` and
-  `AUTOJUDGE_PASSWORD` deployment secrets.
-- Exempt only liveness checks if required by the hosting platform.
-- Do not use wildcard origins.
-- Rotate the shared password when a tester leaves the group.
+### 4. Provider secrets
 
-### 5. Provider secrets
+Create these Hugging Face Secrets:
 
-- Supply `LLM_API_KEY`, `LLM_BASE_URL`, `AGENT_NODE_MODEL`, and
-  `AGENT_NODE_TEMPERATURE` through hosting secrets.
-- Do not use DPAPI or desktop keyring inside the deployment container.
-- Do not bake secrets into the Docker image or frontend bundle.
-- Restrict remote Settings so testers cannot replace provider credentials.
-- Keep explicit paid-run confirmation and the one-AI-run concurrency limit.
+```text
+LLM_API_KEY
+LLM_BASE_URL
+AGENT_NODE_MODEL
+AGENT_NODE_TEMPERATURE
+```
 
-### 6. Research safeguards
+Do not use Windows DPAPI, macOS Keychain, or Linux Secret Service in the container.
+Deployment mode must read provider values directly from environment variables.
+Do not bake secrets into the image, repository, frontend bundle, logs, SQLite, or
+run snapshots. Remote users must not be able to replace provider credentials from
+Settings.
 
-- Preserve trace, taxonomy, schema, node-count, and output-size limits.
-- Keep provider request timeouts and sanitized errors.
-- Add a deployment-wide AI kill switch.
-- Add a daily or monthly spending ceiling when the provider supports it.
-- Show that cancellation may not refund an already-started provider request.
+### 5. Research safeguards
 
-## Minimal repository artifacts
+- Keep Full trace validation, taxonomy/schema validation, DAG validation, provider
+  timeouts, sanitized errors, and the eight-node pipeline limit.
+- Do not impose an artificial application-level trace file-size limit. Surface a
+  clear provider context-window error when a selected model cannot accept a trace.
+- Keep one-AI-run concurrency, clear billing warnings, and provider-side spending controls.
+- Use `AUTOJUDGE_AI_ENABLED=0` as the deployment-wide AI kill switch.
+- Configure a spending ceiling at the provider when supported.
+- State that cancellation may not refund an already-started provider request.
+
+## Hugging Face repository metadata
+
+Add this YAML block at the beginning of the root `README.md` used by the Space:
+
+```yaml
+---
+title: AutoJudge
+emoji: ⚖️
+colorFrom: indigo
+colorTo: purple
+sdk: docker
+app_port: 7860
+---
+```
+
+Required deployment artifacts:
 
 ```text
 Dockerfile
 .dockerignore
-.env.example
+README.md
 DEPLOYMENT.md
-render.yaml or railway configuration
 ```
 
-`DEPLOYMENT.md` must contain setup, secret names, volume mount, health checks,
-backup, restore, rollback, and shutdown instructions. It must not contain real
-credentials.
+`DEPLOYMENT.md` must describe Space creation, visibility, secrets, bucket mount,
+health checks, backup, restore, rollback, and shutdown without real credentials.
 
-## Verification gates
-
-### Local
-
-- Production frontend build passes.
-- Frontend tests pass.
-- Backend tests pass without provider network access.
-- Docker image builds from a clean checkout.
-- Container starts with temporary test secrets.
-- `/api/health` responds successfully.
-- Basic Auth rejects missing and invalid credentials.
-- Trace import, design validation, offline run, SSE progress, and deletion work.
-- A mocked AI run completes without a paid provider call.
-- SQLite data survives a container restart with the volume attached.
-
-### Staging
-
-- HTTPS and authentication work from an external browser.
-- Settings do not expose or allow replacement of provider secrets.
-- One explicitly confirmed real AI smoke test completes.
-- Token and cost reporting are recorded when supplied by the provider.
-- Restarting the service marks an active run as interrupted.
-- Backup and restore are tested before production use.
-
-## Deployment sequence
+## Implementation sequence
 
 1. Review and commit the current UI/backend milestone.
-2. Add single-origin static serving and `AUTOJUDGE_DATA_DIR`.
-3. Add Basic Auth and deployment-safe secret behavior.
-4. Add and locally verify the Docker image.
-5. Choose Railway with a volume or Render with a persistent disk.
-6. Deploy a staging instance and complete the verification gates.
-7. Create a backup and document rollback.
-8. Promote the verified image to the shared research deployment.
+2. Add `AUTOJUDGE_DATA_DIR` and verify the existing local default still works.
+3. Add React static serving and same-origin API/SSE behavior to FastAPI.
+4. Add deployment mode for environment-only provider secrets and lock remote
+   credential editing.
+5. Add optional Basic Auth if Private Space collaboration is insufficient.
+6. Add the Dockerfile, Space metadata, and deployment runbook.
+7. Build and test the image locally without provider network access.
+8. Create a Private Docker Space and attach a writable bucket at `/data`.
+9. Configure Secrets and deploy the staging revision.
+10. Verify persistence, access control, offline workflow, and one owner-authorized
+    paid AI smoke test.
 
-## Rollback triggers
+## Local verification gates
 
-Roll back immediately if any of the following occurs:
+- Production frontend build passes.
+- Frontend and backend tests pass without provider network access.
+- Docker image builds from a clean checkout.
+- Container runs on `0.0.0.0:7860` as a non-root user.
+- `/api/health` responds successfully.
+- Missing or invalid authentication is rejected when Basic Auth is enabled.
+- Trace import, design validation, offline run, SSE progress, and deletion work.
+- A raw nested OpenTelemetry trace larger than the former 5 MB boundary reaches
+  normalization without an application-size rejection.
+- A mocked AI run completes without making a paid provider call.
+- SQLite data survives a local container restart with a mounted volume.
 
-- unauthorized access to the UI, API, runs, or Settings;
-- provider secrets appear in logs, responses, or stored run data;
-- SQLite data disappears or becomes corrupt after restart;
-- AI runs continue after cancellation or service restart without a visible state;
-- the provider is called without explicit paid-run confirmation;
-- the primary Trace to Design to Run to Verdict flow fails in staging.
+## Staging verification gates
+
+- HTTPS and the selected visibility/authentication model work externally.
+- API endpoints cannot bypass the UI access restriction.
+- Settings neither expose nor replace provider secrets.
+- Storage Bucket data survives a Space restart and rebuild.
+- One explicitly confirmed real AI smoke test completes.
+- Token/cost reporting is recorded when returned by the provider.
+- Restarting during a run leaves a visible interrupted state.
+- Backup and restore are tested before inviting the full tester group.
+
+## Deployment procedure
+
+1. Create a new Space with SDK `Docker` and visibility `Private`.
+2. Push the reviewed deployment branch to the Space Git repository.
+3. Attach a writable Storage Bucket to `/data`.
+4. Add provider configuration under Space Settings as Secrets.
+5. Set `AUTOJUDGE_DATA_DIR=/data/autojudge` as a Space Variable.
+6. Wait for the Docker build and verify `/api/health`.
+7. Complete the staging verification gates.
+8. Invite testers as collaborators only after access and persistence checks pass.
+
+Each pushed commit causes the Space to rebuild and restart. Do not deploy while a
+paid evaluation is running.
+
+## Backup and rollback
+
+Before each deployment revision:
+
+- stop new AI runs;
+- create a consistent SQLite backup from the mounted data directory;
+- record the working Space commit SHA;
+- verify that the backup can be opened or restored in a temporary environment.
+
+Roll back by selecting or pushing the last verified Space commit, then confirm the
+database and `/api/health` before reopening access.
+
+Roll back immediately if:
+
+- unauthorized users can access the UI, API, runs, or Settings;
+- provider secrets appear in logs, responses, SQLite, or frontend assets;
+- persisted data disappears or becomes corrupt after restart;
+- AI calls start from an unapproved origin or without configured provider limits;
+- cancellation or restart leaves a run silently active;
+- the Trace → Design → Run → Verdict workflow fails in staging.
+
+## Platform constraints and open decisions
+
+- Docker Spaces currently require an eligible paid Hugging Face account even when
+  CPU Basic has no hourly hardware charge.
+- Free CPU hardware may sleep when unused; the first tester may see a cold start.
+- Confirm Storage Bucket availability and price in the target account before work
+  begins.
+- Decide whether all testers can use Hugging Face collaborator accounts. If not,
+  Basic Auth becomes required implementation rather than optional work.
 
 ## Deferred until justified
 

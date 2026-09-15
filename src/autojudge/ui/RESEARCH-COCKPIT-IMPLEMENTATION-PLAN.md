@@ -156,7 +156,7 @@ React Flow рассматривается только при необходим
 ### New evaluation
 
 - мастер получает новую визуальную оболочку без изменения существующего API-контракта;
-- Design показывает модель и endpoint рядом с paid-run confirmation;
+- Run показывает модель и endpoint, а AI execution выбран по умолчанию;
 - Judge pool использует JudgeCard и отдельный aggregator;
 - Graph использует PipelineGraph;
 - Run отображает live status на тех же узлах;

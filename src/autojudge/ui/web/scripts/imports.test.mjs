@@ -28,6 +28,33 @@ test('taxonomy import trims text and rejects empty files', () => {
   assert.equal(parseDesignFile('taxonomy', '\uFEFF  # Taxonomy\n\n- unsupported_claim  '), '# Taxonomy\n\n- unsupported_claim');
   assert.throws(() => parseDesignFile('taxonomy', '   '));
 });
+test('raw nested OpenTelemetry spans become chronological trace steps', () => {
+  const raw = {
+    trace_id: 'trace-1',
+    spans: [{
+      timestamp: '2026-01-01T00:00:02Z', span_id: 'root', span_name: 'root', service_name: 'orchestrator',
+      span_attributes: {}, logs: [], events: [], child_spans: [{
+        timestamp: '2026-01-01T00:00:01Z', span_id: 'child', parent_span_id: 'root', span_name: 'llm', service_name: 'agent',
+        span_attributes: {
+          'llm.model_name': 'test/model',
+          'llm.input_messages.0.message.role': 'user',
+          'llm.input_messages.0.message.content': 'task',
+          'llm.output_messages.0.message.role': 'assistant',
+          'llm.output_messages.0.message.content': 'answer',
+          'input.value': 'duplicated task',
+          'output.value': 'duplicated answer',
+        }, logs: [], events: [], child_spans: [],
+      }],
+    }],
+  };
+  const steps = normalizeTrace(JSON.stringify(raw));
+  assert.equal(steps.length, 2);
+  assert.equal(steps[0].agent, 'test/model');
+  assert.match(steps[0].content, /"content":"task"/);
+  assert.match(steps[0].content, /"content":"answer"/);
+  assert.doesNotMatch(steps[0].content, /duplicated task|duplicated answer/);
+  assert.match(steps[0].content, /"depth":1/);
+});
 test('bundled traces fit AI input limit and do not include ground truth', () => {
   for (let i = 1; i <= 3; i++) {
     const raw = readFileSync(new URL(`../public/test-data/trace-0${i}.json`, import.meta.url), 'utf8');

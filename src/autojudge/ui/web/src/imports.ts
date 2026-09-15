@@ -18,6 +18,7 @@ export function normalizeTrace(text: string) {
   const clean = text.replace(/^\uFEFF/, '').trim();
   let data;
   try { data = JSON.parse(clean); } catch { data = clean.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line)); }
+  if (!Array.isArray(data) && Array.isArray(data?.spans)) return normalizeSpanTrace(data.spans);
   const arr = Array.isArray(data) ? data : data?.steps ?? data?.turns ?? data?.messages;
   if (!Array.isArray(arr) || !arr.length) throw Error('Expected an array, a steps/turns/messages object, or JSONL.');
   const normalized = arr.map((value: unknown, i: number) => {
@@ -30,4 +31,84 @@ export function normalizeTrace(text: string) {
   });
   if (normalized.some(s => !Number.isFinite(s.id)) || new Set(normalized.map(s => s.id)).size !== normalized.length) throw Error('Step IDs must be numeric and unique.');
   return normalized;
+}
+
+type RawObject = Record<string, unknown>;
+
+function object(value: unknown): RawObject {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as RawObject : {};
+}
+
+function flatMessages(attributes: RawObject, prefix: 'input' | 'output') {
+  const messages = new Map<number, { role?: string; content?: unknown }>();
+  const pattern = new RegExp(`^llm\\.${prefix}_messages\\.(\\d+)\\.message\\.(role|content)$`);
+  for (const [key, value] of Object.entries(attributes)) {
+    const match = key.match(pattern);
+    if (!match) continue;
+    const index = Number(match[1]);
+    const message = messages.get(index) ?? {};
+    if (match[2] === 'role') message.role = String(value);
+    else message.content = value;
+    messages.set(index, message);
+  }
+  return [...messages.entries()].sort(([a], [b]) => a - b).map(([, message]) => message);
+}
+
+function normalizeSpanTrace(rootSpans: unknown[]) {
+  const flattened: { span: RawObject; depth: number; order: number }[] = [];
+  const walk = (value: unknown, depth: number) => {
+    const span = object(value);
+    flattened.push({ span, depth, order: flattened.length });
+    const children = Array.isArray(span.child_spans) ? span.child_spans : [];
+    for (const child of children) walk(child, depth + 1);
+  };
+  for (const span of rootSpans) walk(span, 0);
+  if (!flattened.length) throw Error('The raw span trace is empty.');
+  flattened.sort((a, b) => {
+    const byTime = String(a.span.timestamp ?? '').localeCompare(String(b.span.timestamp ?? ''));
+    return byTime || a.order - b.order;
+  });
+
+  const seenMessages = new Set<string>();
+  return flattened.map(({ span, depth }, index) => {
+    const attributes = object(span.span_attributes);
+    const inputs = flatMessages(attributes, 'input').filter((message) => {
+      const key = JSON.stringify(message);
+      if (seenMessages.has(key)) return false;
+      seenMessages.add(key);
+      return true;
+    });
+    const outputs = flatMessages(attributes, 'output');
+    for (const message of outputs) seenMessages.add(JSON.stringify(message));
+    const hasStructuredInput = Object.keys(attributes).some((key) => key.startsWith('llm.input_messages.'));
+    const hasStructuredOutput = Object.keys(attributes).some((key) => key.startsWith('llm.output_messages.'));
+    const retainedAttributes = Object.fromEntries(Object.entries(attributes).filter(([key]) =>
+      !key.startsWith('pat.') &&
+      !key.startsWith('llm.input_messages.') &&
+      !key.startsWith('llm.output_messages.') &&
+      !key.endsWith('.mime_type') &&
+      !(key === 'input.value' && hasStructuredInput) &&
+      !(key === 'output.value' && hasStructuredOutput)
+    ));
+    const payload = {
+      span_name: span.span_name,
+      span_id: span.span_id,
+      parent_span_id: span.parent_span_id,
+      timestamp: span.timestamp,
+      duration: span.duration,
+      status_code: span.status_code,
+      status_message: span.status_message,
+      depth,
+      attributes: retainedAttributes,
+      input_messages: inputs,
+      output_messages: outputs,
+      events: Array.isArray(span.events) ? span.events : [],
+      logs: Array.isArray(span.logs) ? span.logs : [],
+    };
+    return {
+      id: index + 1,
+      agent: String(attributes['agent.name'] ?? attributes['llm.model_name'] ?? span.service_name ?? span.span_name ?? 'Span'),
+      content: JSON.stringify(payload),
+    };
+  });
 }

@@ -4,7 +4,10 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   server: {
-    allowedHosts: ["plastics-cite-incidents-reason.trycloudflare.com"],
+    allowedHosts: [
+      "plastics-cite-incidents-reason.trycloudflare.com",
+      "imaginary-zoom-jelly.ngrok-free.dev",
+    ],
     proxy: { '/api': 'http://127.0.0.1:8000' },
   },
 });

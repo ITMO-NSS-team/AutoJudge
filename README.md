@@ -1,3 +1,15 @@
+---
+title: AutoJudge
+emoji: ⚖️
+colorFrom: indigo
+colorTo: purple
+sdk: docker
+app_port: 7860
+fullWidth: true
+header: mini
+short_description: Research workspace for evaluating multi-agent execution traces with LLM judges.
+---
+
 # AutoJudge: Dynamic Generation of LLM Judge Pipelines for Multi-Agent System Evaluation
 
 Official anonymous repository for the paper:

@@ -1,4 +1,4 @@
-"""Local API with free offline validation and explicitly confirmed AI runs."""
+"""Local API with AI execution by default and optional offline validation."""
 import asyncio
 import json
 import os
@@ -9,13 +9,28 @@ from pathlib import Path
 from contextlib import asynccontextmanager, contextmanager
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 import credentials
 import env_settings
 
-DB_PATH = Path(__file__).resolve().parents[4] / '.autojudge' / 'workspace.sqlite3'
-ENV_PATH = Path(__file__).resolve().parents[4] / '.env'
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
+DATA_DIR = Path(os.environ.get('AUTOJUDGE_DATA_DIR') or PROJECT_ROOT / '.autojudge')
+DB_PATH = DATA_DIR / 'workspace.sqlite3'
+ENV_PATH = PROJECT_ROOT / '.env'
+WEB_DIST = Path(os.environ.get('AUTOJUDGE_WEB_DIST') or PROJECT_ROOT / 'src' / 'autojudge' / 'ui' / 'web' / 'dist')
+
+
+def settings_read_only():
+    return os.environ.get('AUTOJUDGE_SETTINGS_READ_ONLY', '').strip().lower() in {
+        '1', 'true', 'yes', 'on'
+    }
+
+
+def ai_enabled():
+    return os.environ.get('AUTOJUDGE_AI_ENABLED', '1').strip().lower() not in {
+        '0', 'false', 'no', 'off'
+    }
 
 
 @contextmanager
@@ -74,14 +89,21 @@ def stored_env():
 
 @app.get('/api/settings/env')
 def get_env_settings():
-    return {'fields':env_settings.resolve(ENV_PATH, stored_env(), records('credentials')),
-            'secret_storage':credentials.storage_info(),
-            'execution':'offline by default', 'applied_to_runner':True,
+    stored = {} if settings_read_only() else stored_env()
+    legacy = [] if settings_read_only() else records('credentials')
+    storage = ({'name':'Hosting environment','available':False,'persistent':False}
+               if settings_read_only() else credentials.storage_info())
+    return {'fields':env_settings.resolve(ENV_PATH, stored, legacy),
+            'secret_storage':storage,
+            'read_only':settings_read_only(),
+            'execution':'AI by default', 'applied_to_runner':True,
             'runner_fields':['LLM_BASE_URL','LLM_API_KEY','OPENROUTER_API_KEY','AGENT_NODE_MODEL','AGENT_NODE_TEMPERATURE']}
 
 
 @app.put('/api/settings/env')
 async def save_env_settings(request: Request):
+    if settings_read_only():
+        raise HTTPException(403, 'Deployment settings are read-only; use the hosting environment')
     check_credential_origin(request)
     if request.headers.get('content-type','').split(';')[0] != 'application/json':
         raise HTTPException(415,'JSON required')
@@ -144,6 +166,8 @@ def check_credential_origin(request: Request):
 
 @app.put('/api/credentials/openrouter')
 async def set_credential(request: Request):
+    if settings_read_only():
+        raise HTTPException(403, 'Deployment settings are read-only; use the hosting environment')
     check_credential_origin(request)
     if request.headers.get('content-type', '').split(';')[0] != 'application/json':
         raise HTTPException(415, 'JSON required')
@@ -172,6 +196,8 @@ async def set_credential(request: Request):
 
 @app.delete('/api/credentials/openrouter')
 def delete_credential(request: Request):
+    if settings_read_only():
+        raise HTTPException(403, 'Deployment settings are read-only; use the hosting environment')
     check_credential_origin(request)
     credentials.remove('OPENROUTER_API_KEY',stored_env().get('OPENROUTER_API_KEY'))
     with connect() as db:
@@ -183,11 +209,21 @@ def delete_credential(request: Request):
 class RunRequest(BaseModel):
     config: dict
     steps: list[dict] = Field(min_length=1, max_length=10000)
-    execution: str = 'offline'
-    confirm_paid: bool = False
+    execution: str = 'ai'
 
 
 def ai_settings():
+    if settings_read_only():
+        endpoint = os.environ.get('LLM_BASE_URL', 'https://openrouter.ai/api/v1').rstrip('/')
+        model = os.environ.get('AGENT_NODE_MODEL', 'google/gemini-2.5-flash')
+        temp = os.environ.get('AGENT_NODE_TEMPERATURE', '0.1')
+        env_settings.validate('LLM_BASE_URL', endpoint)
+        env_settings.validate('AGENT_NODE_MODEL', model)
+        env_settings.validate('AGENT_NODE_TEMPERATURE', temp)
+        key = os.environ.get('LLM_API_KEY', '')
+        if not key and endpoint == 'https://openrouter.ai/api/v1':
+            key = os.environ.get('OPENROUTER_API_KEY', '')
+        return key, float(temp), model, endpoint
     from dotenv import dotenv_values
     stored=stored_env()
     env=dotenv_values(ENV_PATH,interpolate=False) if ENV_PATH.exists() else {}
@@ -215,8 +251,8 @@ def validate_ai(request):
     config=request.config
     if config.get('mode')!='Full trace':
         raise HTTPException(422,'AI execution currently requires Full trace')
-    if len(config['nodes'])>8 or len(json.dumps(request.steps))>100000:
-        raise HTTPException(422,'First AI runner supports at most 8 nodes and 100 KB of trace JSON')
+    if len(config['nodes'])>8:
+        raise HTTPException(422,'AI runner supports at most 8 nodes')
     if not config.get('objective','').strip():
         raise HTTPException(422,'Objective is required')
     if not isinstance(config.get('taxonomy'),str) or not config['taxonomy'].strip():
@@ -311,7 +347,7 @@ def validate(config):
 @app.get('/api/health')
 def health():
     return {'status':'ok','execution':'offline','paid_calls_enabled':False,
-            'ai_available':True,'ai_requires_explicit_confirmation':True}
+            'ai_available':ai_enabled(),'ai_requires_explicit_confirmation':False}
 
 
 @app.get('/api/runs')
@@ -388,9 +424,9 @@ async def create_run(request: RunRequest, http_request: Request):
     if request.execution not in ('offline','ai'):
         raise HTTPException(403,'Unsupported execution mode')
     if request.execution == 'ai':
+        if not ai_enabled():
+            raise HTTPException(503, 'AI execution is disabled by the deployment owner')
         check_credential_origin(http_request)
-        if not request.confirm_paid:
-            raise HTTPException(403,'Explicit paid-run confirmation required')
         if any(r['status']=='Running' and r.get('execution')=='ai' for r in records('runs')):
             raise HTTPException(409,'Another AI run is already active')
     levels=validate(request.config)
@@ -485,3 +521,21 @@ def save_workspace(body: dict):
     allowed={k:body[k] for k in ('config','settings') if k in body}
     put('workspace','current',allowed)
     return {'saved':True}
+
+
+@app.get('/{path:path}', include_in_schema=False)
+def frontend(path: str):
+    if path.startswith('api/') or not WEB_DIST.is_dir():
+        raise HTTPException(404, 'Not found')
+    root = WEB_DIST.resolve()
+    candidate = (root / path).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        raise HTTPException(404, 'Not found')
+    if path and candidate.is_file():
+        return FileResponse(candidate)
+    index = root / 'index.html'
+    if not index.is_file():
+        raise HTTPException(404, 'Frontend build not found')
+    return FileResponse(index)

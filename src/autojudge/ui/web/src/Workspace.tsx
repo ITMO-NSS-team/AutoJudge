@@ -23,6 +23,7 @@ import "./wizard.css";
 import SemanticBadge from "./SemanticBadge";
 import PipelineGraph from "./PipelineGraph";
 import EnvSettings from "./EnvSettings";
+import { api } from "./apiClient";
 import { exampleOutputSchema, exampleTaxonomy } from "./designTemplate";
 import { normalizeTrace, parseDesignFile } from "./imports";
 
@@ -39,20 +40,6 @@ type Config = {
   nodes: string[];
   edges: string[][];
 };
-async function api<T>(
-  path: string,
-  method = "GET",
-  body?: unknown,
-): Promise<T> {
-  const res = await fetch("/api" + path, {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  if (!res.ok) throw Error(await res.text());
-  return res.json();
-}
-
 type Run = {
   execution?: string;
   final_output?: unknown;
@@ -112,7 +99,7 @@ const initial: Config = {
   schema:
     '{"type":"object","properties":{"verdict":{"type":"string"},"evidence":{"type":"array"}}}',
   examples: "[]",
-  model: "openrouter/auto",
+  model: "",
   mode: "Full trace",
   nodes: roles,
   edges: roles.slice(0, -1).map((n) => [n, "FINAL_AGGREGATOR"]),
@@ -195,20 +182,19 @@ function Field({
 export default function Workspace() {
   const [previousDesign, setPreviousDesign] = useState<{ taxonomy: string; schema: string } | null>(null);
   const [connected, setConnected] = useState(false);
-  const [execution, setExecution] = useState("offline");
-  const [confirmPaid, setConfirmPaid] = useState(false);
+  const [execution, setExecution] = useState("ai");
+  const [selectedExample, setSelectedExample] = useState("");
   const [launching, setLaunching] = useState(false);
   const [page, setPage] = useState(() =>
     sections.includes(decodeURIComponent(location.hash.slice(1)))
       ? decodeURIComponent(location.hash.slice(1))
       : "Overview",
   );
-  useEffect(() => {
-    setConfirmPaid(false);
-  }, [page]);
-  const [config, setConfig] = useState<Config>(() =>
-    ({ ...initial, ...read("aj-config", initial) }),
-  );
+  const [config, setConfig] = useState<Config>(() => ({
+    ...initial,
+    ...read("aj-config", initial),
+    model: "",
+  }));
   const [steps, setSteps] = useState<Step[]>(sample);
   const [raw, setRaw] = useState(JSON.stringify(sample, null, 2));
   const [traceIssue, setTraceIssue] = useState("");
@@ -216,6 +202,14 @@ export default function Workspace() {
   const [wizard, setWizard] = useState(0);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  useEffect(() => {
+    if (!error && !notice) return;
+    const timer = window.setTimeout(() => {
+      setError("");
+      setNotice("");
+    }, 6_000);
+    return () => window.clearTimeout(timer);
+  }, [error, notice]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All");
   const [compare, setCompare] = useState<string[]>([]);
@@ -301,7 +295,7 @@ export default function Workspace() {
             ...ws.config,
             taxonomy: ws.config.taxonomy?.trim() ? ws.config.taxonomy : exampleTaxonomy,
             mode: "Full trace",
-            model: selectedModel || ws.config.model,
+            model: selectedModel || "",
             nodes: roles,
             edges: usesFixedJudges ? ws.config.edges : initial.edges,
             judge_instructions: Object.fromEntries(
@@ -309,7 +303,7 @@ export default function Workspace() {
             ),
           });
         }
-        else if(selectedModel) setConfig((current)=>({...current,model:selectedModel}));
+        else setConfig((current)=>({...current,model:selectedModel || ""}));
         setActive(rs.find((r) => r.status === "Running") ?? null);
         setConnected(true);
       })
@@ -380,7 +374,6 @@ export default function Workspace() {
             taxonomy: exampleTaxonomy,
             schema: JSON.stringify(exampleOutputSchema, null, 2),
           }));
-          setConfirmPaid(false);
           setError("");
           setNotice(
             "The example.md taxonomy and output schema were applied; other fields were retained.",
@@ -395,7 +388,6 @@ export default function Workspace() {
           onClick={() => {
             setConfig((c) => ({ ...c, ...previousDesign }));
             setPreviousDesign(null);
-            setConfirmPaid(false);
             setNotice("The previous taxonomy and output schema were restored.");
           }}
         >
@@ -411,9 +403,8 @@ export default function Workspace() {
       const text = await response.text();
       if (parseTrace(text)) {
         setRaw(text);
-        update("name", "GAIA test " + id);
+        update("name", "Example " + id);
         update("mode", "Full trace");
-        setConfirmPaid(false);
       }
     } catch (e) {
       setError(String(e));
@@ -492,20 +483,12 @@ export default function Workspace() {
       return;
     }
     try {
-      if (execution === "ai" && !confirmPaid) {
-        setError(
-          "Confirm sending the trace to the provider and starting a paid run.",
-        );
-        return;
-      }
       setLaunching(true);
       const run = await api<Run>("/runs", "POST", {
         config,
         steps: normalizeTrace(raw),
         execution,
-        confirm_paid: confirmPaid,
       });
-      setConfirmPaid(false);
       setDetail(null);
       setActive(run);
       setPhase(0);
@@ -561,6 +544,7 @@ export default function Workspace() {
         .includes(query.toLowerCase()),
   );
   const selectedRuns = runs.filter((run) => compare.includes(run.id));
+  const activeModelLabel = config.model || "Not configured";
   async function archiveSelectedRuns() {
     if (!selectedRuns.length) return;
     try {
@@ -634,7 +618,7 @@ export default function Workspace() {
         <tbody>
           {list.map((r) => (
             <tr key={r.id}>
-              <td>
+              <td data-label="Select">
                 <input
                   aria-label={`Select ${r.id}`}
                   type="checkbox"
@@ -648,7 +632,7 @@ export default function Workspace() {
                   }
                 />
               </td>
-              <td>
+              <td data-label="Run / Trace">
                 <button
                   className="link"
                   onClick={() => {
@@ -662,11 +646,11 @@ export default function Workspace() {
                   {r.id} · {new Date(r.date).toLocaleString()}
                 </small>
               </td>
-              <td>
+              <td data-label="Pipeline">
                 <SemanticBadge status={r.status} />
               </td>
-              <td>{r.verdict}</td>
-              <td>
+              <td data-label="Verdict">{r.verdict}</td>
+              <td data-label="Model / Context">
                 {r.config.model}
                 <small>{r.config.mode}</small>
               </td>
@@ -752,7 +736,7 @@ export default function Workspace() {
   );
 
   return (
-    <div className="workspace-app">
+    <div className={`workspace-app ${page === "New evaluation" ? "evaluation-page" : ""}`}>
       <aside>
         <div className="brand workspace-brand">
           <span className="workspace-brand-mark"><Scale size={19} /></span>
@@ -782,21 +766,21 @@ export default function Workspace() {
           </div>
           <div className="sidebar-model">
             <Cpu size={15} />
-            <span><small>Judge model</small><strong>{config.model}</strong></span>
+            <span><small>Judge model</small><strong>{activeModelLabel}</strong></span>
           </div>
         </div>
       </aside>
-      <div className="work-body">
+      <div className={`work-body ${page === "New evaluation" ? "evaluation-active" : ""}`}>
         <header>
           <span>
             Workspace / <strong>{page}</strong>
           </span>
           <div className="header-context">
-            <span className="header-model"><Cpu size={14} /> {config.model}</span>
+            <span className="header-model"><Cpu size={14} /> {activeModelLabel}</span>
             <SemanticBadge status={connected ? "Completed" : "Offline"} label={connected ? "Backend online" : "Backend offline"} />
           </div>
         </header>
-        <main>
+        <main className={page === "New evaluation" ? "evaluation-main" : undefined}>
           <div className="work-title">
             <div>
               <span className="eyebrow">AUTOJUDGE / WORKBENCH</span>
@@ -813,18 +797,20 @@ export default function Workspace() {
               <Plus size={16} /> New evaluation
             </button>
           </div>
-          {error && (
-            <div role="alert" className="error-banner">
-              {error}
-              <button onClick={() => setError("")}>Close</button>
-            </div>
-          )}
-          {notice && (
-            <div role="status" className="notice">
-              {notice}
-              <button onClick={() => setNotice("")}>×</button>
-            </div>
-          )}
+          <div className="toast-stack" aria-live="polite">
+            {error && (
+              <div role="alert" className="toast toast--error">
+                {error}
+                <button aria-label="Close error" onClick={() => setError("")}>×</button>
+              </div>
+            )}
+            {notice && (
+              <div role="status" className="toast toast--notice">
+                {notice}
+                <button aria-label="Close notification" onClick={() => setNotice("")}>×</button>
+              </div>
+            )}
+          </div>
 
           {page === "Overview" && (
             <>
@@ -836,7 +822,7 @@ export default function Workspace() {
                   </p>
                 </div>
                 <div className="cockpit-hero-meta">
-                  <span><Cpu size={16} /><small>Judge model</small><strong>{config.model}</strong></span>
+                  <span><Cpu size={16} /><small>Judge model</small><strong>{activeModelLabel}</strong></span>
                   <span><Server size={16} /><small>Backend</small><SemanticBadge status={connected ? "Completed" : "Offline"} label={connected ? "Connected" : "Offline"} /></span>
                 </div>
               </section>
@@ -873,7 +859,7 @@ export default function Workspace() {
                   <span className="eyebrow">NEXT ACTION</span>
                   <h2>Start an evaluation</h2>
                   <p>
-                    Upload a trace, validate the graph, and choose a dry run or confirmed AI execution.
+                    Upload a trace, validate the graph, and run the AI pipeline.
                   </p>
                   <button className="primary-button" onClick={() => navigate("New evaluation")}>
                     Open evaluation wizard <ArrowRight size={16} />
@@ -906,42 +892,48 @@ export default function Workspace() {
                   </button>
                 ))}
               </div>
-              <section className="panel">
+              <section className="panel evaluation-panel">
                 {wizard === 0 && (
-                  <div className="two-col">
-                    <div>
-                      <h2>Upload trace</h2>
+                  <div className="evaluation-split">
+                    <div className="evaluation-pane evaluation-pane--controls">
+                      <div className="evaluation-pane-heading">
+                        <span className="eyebrow">SOURCE</span>
+                        <h2>Trace setup</h2>
+                      </div>
                       <p>
-                        Test traces from the GAIA archive, without ground-truth
+                        Examples from the GAIA archive, without ground-truth
                         annotations. Attachments are not included.
                       </p>
-                      <div className="toolbar">
-                        {[1, 2, 3].map((id) => (
-                          <button
-                            key={id}
-                            onClick={() => void loadTestTrace(id)}
-                          >
-                            GAIA test {id}
-                          </button>
-                        ))}
-                      </div>
+                      <label className="field">
+                        <span>Load example</span>
+                        <select
+                          aria-label="Load example trace"
+                          value={selectedExample}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            setSelectedExample(value);
+                            if (value) void loadTestTrace(Number(value));
+                          }}
+                        >
+                          <option value="">Choose an example…</option>
+                          {[1, 2, 3].map((id) => (
+                            <option key={id} value={id}>Example {id}</option>
+                          ))}
+                        </select>
+                      </label>
                       <Field
                         label="Trace name"
                         value={config.name}
                         change={(v) => update("name", v)}
                       />
                       <label className="file-input">
-                        JSON / JSONL
+                        JSON / JSONL / raw OpenTelemetry spans
                         <input
                           type="file"
                           accept=".json,.jsonl"
                           onChange={async (e) => {
                             const f = e.target.files?.[0];
                             if (f) {
-                              if (f.size > 5_000_000) {
-                                setError("Local prototype limit: 5 MB.");
-                                return;
-                              }
                               const text = await f.text();
                               setRaw(text);
                               update("name", f.name);
@@ -950,43 +942,48 @@ export default function Workspace() {
                           }}
                         />
                       </label>
-                      <Field
-                        label="Paste JSON / JSONL"
-                        area
-                        value={raw}
-                        change={setRaw}
-                      />
-                      <button onClick={() => parseTrace(raw)}>
-                        Parse &amp; validate trace
-                      </button>
-                      <p className="hint">Context: Full trace</p>
+                      <div className="compact-source-editor">
+                        <Field
+                          label="Paste JSON / JSONL"
+                          area
+                          value={raw}
+                          change={setRaw}
+                        />
+                      </div>
+                      <div className="evaluation-inline-actions">
+                        <button onClick={() => parseTrace(raw)}>
+                          Parse &amp; validate trace
+                        </button>
+                        <span className="hint">Context: Full trace</span>
+                      </div>
                     </div>
-                    <div>
-                      <h2>Trace preview · {steps.length} steps</h2>
+                    <div className="evaluation-divider" aria-hidden="true" />
+                    <div className="evaluation-pane evaluation-pane--preview">
+                      <div className="evaluation-pane-heading evaluation-pane-heading--row">
+                        <div>
+                          <span className="eyebrow">DATA PREVIEW</span>
+                          <h2>Normalized trace</h2>
+                        </div>
+                        <span className="preview-count">{steps.length} steps</span>
+                      </div>
                       {traceIssue && <p role="alert" className="hint">Preview paused: {traceIssue}</p>}
                       {traceView(steps)}
                     </div>
                   </div>
                 )}
                 {wizard === 1 && (
-                  <>
-                    {templateButtons}
-                    <p>
-                      The template is intended for error attribution; adapt the
-                      taxonomy and schema for successful and uncertain cases.
-                    </p>
-                    <p>
-                      Test files:{" "}
-                      <a href="/test-data/output-schema.json" download>
-                        output schema
-                      </a>{" "}
-                      and{" "}
-                      <a href="/test-data/TAXONOMY.md" download>
-                        taxonomy
-                      </a>{" "}
-                      . Download and upload the required files below.
-                    </p>
-                    <div className="two-col design-fields">
+                  <div className="evaluation-split design-fields">
+                    <div className="evaluation-pane evaluation-pane--controls">
+                      <div className="evaluation-pane-heading">
+                        <span className="eyebrow">SETUP</span>
+                        <h2>Evaluation design</h2>
+                      </div>
+                      {templateButtons}
+                      <p className="evaluation-copy">
+                        Apply the example or provide your own taxonomy and output schema.
+                        Test files: <a href="/test-data/output-schema.json" download>output schema</a>
+                        {" · "}<a href="/test-data/TAXONOMY.md" download>taxonomy</a>.
+                      </p>
                       <div>
                         <Field
                           label="Evaluation objective"
@@ -994,21 +991,30 @@ export default function Workspace() {
                           value={config.objective}
                           change={(v) => update("objective", v)}
                         />
-                        <Field
-                          label="Judge model"
-                          value={config.model}
-                          change={(v) => update("model", v)}
-                        />
                       </div>
-                      <div>
+                      <div className="design-file-stack">
                         {designUpload("taxonomy")}
+                        {designUpload("schema")}
+                      </div>
+                    </div>
+                    <div className="evaluation-divider" aria-hidden="true" />
+                    <div className="evaluation-pane evaluation-pane--preview">
+                      <div className="evaluation-pane-heading evaluation-pane-heading--row">
+                        <div>
+                          <span className="eyebrow">DATA PREVIEW</span>
+                          <h2>Taxonomy &amp; output</h2>
+                        </div>
+                        <button onClick={() => void validateDesign()}>
+                          Validate design
+                        </button>
+                      </div>
+                      <div className="design-preview-grid">
                         <Field
                           label="Taxonomy (Markdown)"
                           area
                           value={config.taxonomy}
                           change={(v) => update("taxonomy", v)}
                         />
-                        {designUpload("schema")}
                         <Field
                           label="Output schema (JSON)"
                           area
@@ -1024,40 +1030,36 @@ export default function Workspace() {
                             change={(v) => update("examples", v)}
                           />
                         </details>
-                        <button onClick={() => void validateDesign()}>
-                          Validate design
-                        </button>
                       </div>
                     </div>
-                  </>
+                  </div>
                 )}
                 {wizard === 2 && (
-                  <>
-                    <h2>
-                      {active
-                        ? "The server is running " +
-                          (active.execution === "ai"
-                            ? "AI pipeline"
-                            : "dry run")
-                        : "Ready to run"}
-                    </h2>
-                    {!active && (
-                      <>
+                  <div className="evaluation-split evaluation-run-layout">
+                    <div className="evaluation-pane evaluation-pane--controls">
+                      <div className="evaluation-pane-heading">
+                        <span className="eyebrow">EXECUTION</span>
+                        <h2>
+                          {active
+                            ? "The server is running " +
+                              (active.execution === "ai" ? "AI pipeline" : "dry run")
+                            : "Ready to run"}
+                        </h2>
+                      </div>
+                      {!active && (
+                        <>
                         <label className="field">
                           <span>Execution mode</span>
                           <select
                             disabled={launching}
                             value={execution}
-                            onChange={(e) => {
-                              setExecution(e.target.value);
-                              setConfirmPaid(false);
-                            }}
+                            onChange={(e) => setExecution(e.target.value)}
                           >
-                            <option value="offline">
-                              Dry run — structure only, no AI
-                            </option>
                             <option value="ai">
-                              AI — live AutoJudge pipeline
+                              LLM Judge
+                            </option>
+                            <option value="offline">
+                              Dry run
                             </option>
                           </select>
                         </label>
@@ -1065,36 +1067,14 @@ export default function Workspace() {
                           <div className="finding">
                             <p>
                               Endpoint from Settings ·{" "}
-                              {config.model === "openrouter/auto"
-                                ? "model from AGENT_NODE_MODEL"
-                                : config.model}{" "}
-                              · {config.nodes.length} nodes. Up to one request and
-                              1,024 output tokens per node, without automatic
-                              retries. Full trace only, without tools.
+                              {activeModelLabel}
                             </p>
-                            <p>
-                              The trace will be sent to the endpoint in Settings.
-                              Check costs with the provider and use a provider-side
-                              key limit. Cancellation does not refund charges
-                              already incurred.
-                            </p>
-                            <label>
-                              <input
-                                type="checkbox"
-                                checked={confirmPaid}
-                                onChange={(e) =>
-                                  setConfirmPaid(e.target.checked)
-                                }
-                              />{" "}
-                              I confirm data transfer and the paid run
-                            </label>
                           </div>
                         )}
-                      </>
-                    )}
-                    <PipelineGraph config={active?.config ?? config} />
-                    {phase >= 0 && (
-                      <>
+                        </>
+                      )}
+                      {phase >= 0 && (
+                        <div className="run-progress-block">
                         <progress max={4} value={phase + 1} />
                         <div aria-live="polite">
                           {
@@ -1107,35 +1087,42 @@ export default function Workspace() {
                           }
                         </div>
                         <button onClick={cancel}>Cancel run</button>
-                      </>
-                    )}
-                    {!active && (
-                      <button
-                        className="primary-button"
-                        disabled={
-                          launching ||
-                          !connected ||
-                          (execution === "ai" && !confirmPaid)
-                        }
-                        onClick={launch}
-                      >
-                        <Play size={16} />
-                        {launching
-                          ? "Creating run…"
-                          : execution === "ai"
-                            ? "Run AI evaluation"
-                            : "Run dry check"}
-                      </button>
-                    )}
-                  </>
+                        </div>
+                      )}
+                      {!active && (
+                        <button
+                          className="primary-button"
+                          disabled={launching || !connected}
+                          onClick={launch}
+                        >
+                          <Play size={16} />
+                          {launching
+                            ? "Creating run…"
+                            : execution === "ai"
+                              ? "Run AI evaluation"
+                              : "Run dry check"}
+                        </button>
+                      )}
+                    </div>
+                    <div className="evaluation-divider" aria-hidden="true" />
+                    <div className="evaluation-pane evaluation-pane--preview">
+                      <div className="evaluation-pane-heading evaluation-pane-heading--row">
+                        <div>
+                          <span className="eyebrow">PIPELINE PREVIEW</span>
+                          <h2>{config.nodes.length} configured judges</h2>
+                        </div>
+                        <span className="preview-count">{steps.length} trace steps</span>
+                      </div>
+                      <PipelineGraph config={active?.config ?? config} />
+                    </div>
+                  </div>
                 )}
                 {wizard === 3 &&
                   (detail ? (
-                    resultView(detail)
+                    <div className="evaluation-result">{resultView(detail)}</div>
                   ) : (
-                    <p>
-                      No result yet. Open Run and perform a dry check or a
-                      confirmed AI evaluation.
+                    <p className="evaluation-empty-result">
+                      No result yet. Open Run and start an AI evaluation or dry check.
                     </p>
                   ))}
                 <div className="wizard-footer">
@@ -1157,7 +1144,7 @@ export default function Workspace() {
 
           {page === "Runs" && (
             <>
-              <section className="panel">
+              <section className="panel runs-panel">
                 <div className="toolbar">
                   <Search size={17} />
                   <input
@@ -1250,7 +1237,7 @@ export default function Workspace() {
             <section className="panel">
               <h2>Usage & cost</h2>
               <p>
-                Confirmed AI requests:{" "}
+                AI requests:{" "}
                 {runs
                   .filter((r) => r.execution === "ai")
                   .reduce((n, r) => n + (r.usage?.calls ?? 0), 0)}
@@ -1302,8 +1289,8 @@ export default function Workspace() {
               </p>
               <EnvSettings
                 onSettingsSaved={(fields) => {
-                  const model = fields.find((field) => field.name === "AGENT_NODE_MODEL")?.value?.trim();
-                  if (model) setConfig((current) => ({ ...current, model }));
+                  const model = fields.find((field) => field.name === "AGENT_NODE_MODEL")?.value?.trim() || "";
+                  setConfig((current) => ({ ...current, model }));
                 }}
               />
               <button

@@ -9,6 +9,69 @@ import server
 
 
 class ApiTests(unittest.TestCase):
+    def test_hosted_environment_settings_are_read_only(self):
+        hosted = {
+            'AUTOJUDGE_SETTINGS_READ_ONLY': '1',
+            'LLM_BASE_URL': 'https://provider.example/v1',
+            'LLM_API_KEY': 'hosted-test-secret',
+            'AGENT_NODE_MODEL': 'test/hosted-model',
+            'AGENT_NODE_TEMPERATURE': '0.4',
+            'AUTOJUDGE_AI_ENABLED': '0',
+        }
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            server, 'DB_PATH', Path(directory) / 'test.sqlite'
+        ), patch.object(server, 'ENV_PATH', Path(directory) / '.env'), patch.dict(
+            'os.environ', hosted, clear=True
+        ):
+            with TestClient(server.app) as client:
+                response = client.get('/api/settings/env')
+                self.assertTrue(response.json()['read_only'])
+                self.assertEqual(response.json()['secret_storage']['name'], 'Hosting environment')
+                self.assertNotIn(hosted['LLM_API_KEY'], response.text)
+                self.assertFalse(client.get('/api/health').json()['ai_available'])
+                self.assertEqual(
+                    client.put('/api/settings/env', json={'values': {}}, headers={
+                        'Origin': 'http://127.0.0.1:8000'
+                    }).status_code,
+                    403,
+                )
+                self.assertEqual(
+                    client.put('/api/credentials/openrouter', json={'key': 'x' * 20}).status_code,
+                    403,
+                )
+                ai_request = {
+                    'config': {
+                        'nodes': ['Judge', 'FINAL_AGGREGATOR'],
+                        'edges': [['Judge', 'FINAL_AGGREGATOR']],
+                        'schema': '{"type":"object"}',
+                        'examples': '[]',
+                        'objective': 'Check',
+                        'taxonomy': 'Test taxonomy',
+                        'mode': 'Full trace',
+                        'model': 'test/hosted-model',
+                    },
+                    'steps': [{'id': 1, 'content': 'test'}],
+                    'execution': 'ai',
+                }
+                self.assertEqual(client.post('/api/runs', json=ai_request).status_code, 503)
+            self.assertEqual(
+                server.ai_settings(),
+                ('hosted-test-secret', 0.4, 'test/hosted-model', 'https://provider.example/v1'),
+            )
+
+    def test_frontend_build_and_spa_fallback_are_served(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            server, 'WEB_DIST', Path(directory)
+        ):
+            web = Path(directory)
+            (web / 'index.html').write_text('<main>AutoJudge production</main>', encoding='utf-8')
+            (web / 'asset.txt').write_text('asset', encoding='utf-8')
+            with TestClient(server.app) as client:
+                self.assertIn('AutoJudge production', client.get('/').text)
+                self.assertIn('AutoJudge production', client.get('/nested/route').text)
+                self.assertEqual(client.get('/asset.txt').text, 'asset')
+                self.assertEqual(client.get('/api/not-a-real-route').status_code, 404)
+
     def test_non_windows_keyring_payload_contains_no_secret(self):
         secret='cross-platform-test-secret'
         with patch.object(server.credentials.sys,'platform','linux'), patch.object(
@@ -84,7 +147,7 @@ class ApiTests(unittest.TestCase):
 
     def test_lifecycle(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(server, 'DB_PATH', Path(directory)/'test.sqlite'):
-            request={'config':{'nodes':['Judge','FINAL_AGGREGATOR'],'edges':[['Judge','FINAL_AGGREGATOR']],'schema':'{"type":"object"}','examples':'[]','taxonomy':'Test taxonomy'},'steps':[{'id':1,'content':'test'}]}
+            request={'config':{'nodes':['Judge','FINAL_AGGREGATOR'],'edges':[['Judge','FINAL_AGGREGATOR']],'schema':'{"type":"object"}','examples':'[]','taxonomy':'Test taxonomy'},'steps':[{'id':1,'content':'test'}],'execution':'offline'}
             with TestClient(server.app) as client:
                 self.assertFalse(client.get('/api/health').json()['paid_calls_enabled'])
                 self.assertEqual(client.post('/api/runs',json={**request,'execution':'llm'}).status_code,403)
@@ -145,8 +208,24 @@ class ApiTests(unittest.TestCase):
                 self.assertEqual(client.put('/api/settings/env',json={'values':{'AGENT_NODE_MODEL':'z-ai/glm-5.3-flash'}},headers=headers).status_code,200)
                 self.assertEqual(client.put('/api/settings/env',json={'values':{'AGENT_NODE_MODEL':'z-ai модель'}},headers=headers).status_code,422)
 
+    def test_ai_validation_does_not_limit_normalized_raw_trace_size(self):
+        request=server.RunRequest(
+            config={
+                'nodes':['Judge','FINAL_AGGREGATOR'],
+                'edges':[['Judge','FINAL_AGGREGATOR']],
+                'mode':'Full trace',
+                'objective':'Evaluate raw spans',
+                'taxonomy':'Test taxonomy',
+                'schema':'{"type":"object"}',
+                'model':'test/model',
+            },
+            steps=[{'id':1,'content':'x'*5_100_000}],
+            execution='ai',
+        )
+        server.validate_ai(request)
+
     def test_run_can_be_permanently_deleted(self):
-        request={'config':{'nodes':['Judge','FINAL_AGGREGATOR'],'edges':[['Judge','FINAL_AGGREGATOR']],'schema':'{"type":"object"}','examples':'[]','objective':'Check','taxonomy':'Test taxonomy'},'steps':[{'id':1,'content':'test'}]}
+        request={'config':{'nodes':['Judge','FINAL_AGGREGATOR'],'edges':[['Judge','FINAL_AGGREGATOR']],'schema':'{"type":"object"}','examples':'[]','objective':'Check','taxonomy':'Test taxonomy'},'steps':[{'id':1,'content':'test'}],'execution':'offline'}
         with tempfile.TemporaryDirectory() as directory, patch.object(server,'DB_PATH',Path(directory)/'test.sqlite'):
             with TestClient(server.app) as client:
                 run=client.post('/api/runs',json=request).json()

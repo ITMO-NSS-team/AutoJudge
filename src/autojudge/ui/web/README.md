@@ -5,9 +5,9 @@ pipeline.
 
 ## Workflow
 
-1. Trace — import JSON or JSONL and inspect the live preview.
+1. Trace — import normalized JSON/JSONL or raw nested OpenTelemetry spans and inspect the live preview.
 2. Design — set the objective, taxonomy, model, output schema, and optional few-shot examples.
-3. Run — review the static pipeline and choose a dry or confirmed AI run.
+3. Run — review the static pipeline and start an AI run or dry check.
 4. Verdict — inspect the result and supporting node outputs.
 
 The navigation contains Overview, New evaluation, Runs, Compare, Observability,

@@ -11,6 +11,6 @@ Only the turns array remains: role, content, thought, and action. Top-level gold
 
 The UI assigns IDs from 1; source annotation numbers may differ. The thought and action fields are retained in the preview. The examples support import, navigation, offline runs, and manual AI wiring checks, but not quantitative judge-quality evaluation.
 
-output-schema.json and TAXONOMY.md are compact smoke-test examples. In Trace, click GAIA test 1–3. In Design, download the files and upload them through the schema and taxonomy fields. AI runs require separate confirmation to transfer data to the configured provider; preparing these files did not invoke AI.
+output-schema.json and TAXONOMY.md are compact smoke-test examples. In Trace, select Example 1–3. In Design, download the files and upload them through the schema and taxonomy fields. Preparing these files does not invoke AI.
 
 Verification: `node --test scripts/imports.test.mjs` from web. Five tests passed, as did `npm run build`. In the browser, the Trace → Design transition and the presence of upload buttons were verified. The file dialog was not tested end to end.
