@@ -55,7 +55,7 @@ class ApiTests(unittest.TestCase):
                 self.assertEqual(client.post('/api/runs', json=ai_request).status_code, 503)
             self.assertEqual(
                 server.ai_settings(),
-                ('hosted-test-secret', 0.4, 'test/hosted-model'),
+                ('hosted-test-secret', 0.4, 'test/hosted-model', 'https://openrouter.ai/api/v1'),
             )
 
     def test_master_key_storage_encrypts_at_rest(self):
@@ -113,7 +113,7 @@ class ApiTests(unittest.TestCase):
                 headers={'Origin':'http://127.0.0.1:5173'}
                 path='/api/settings/env'
                 fields=client.get(path).json()['fields']
-                self.assertEqual(len(fields),14)
+                self.assertEqual(len(fields),15)
                 self.assertNotIn('MCP models',{field['group'] for field in fields})
                 values={'HF_TOKEN':'fake-token-for-offline-test','DB_PORT':'5433','AGENT_NODE_TEMPERATURE':'0.7'}
                 response=client.put(path,json={'values':values},headers=headers)

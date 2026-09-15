@@ -11,6 +11,7 @@ if SOURCE not in sys.path:
 from autojudge.pipeline import AgentNode, Pipeline, PipelineBuilder
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 from pydantic_ai.usage import UsageLimits
 from jsonschema import Draft202012Validator
@@ -58,14 +59,17 @@ class ObservedPipeline(Pipeline):
             raise RuntimeError('Model request failed') from None
 
 
-async def run(config, steps, key, temperature, emit, model_override=None):
+async def run(config, steps, key, temperature, emit, model_override=None, base_url=OPENROUTER_BASE_URL):
     model_name = config['model']
     nodes=[]
     async with AsyncClient(timeout=60) as transport:
-        client = AsyncOpenAI(base_url=OPENROUTER_BASE_URL, api_key=key,
+        client = AsyncOpenAI(base_url=base_url, api_key=key,
                              max_retries=0, http_client=transport)
+        provider = (OpenRouterProvider(openai_client=client)
+                    if base_url.rstrip('/') == OPENROUTER_BASE_URL
+                    else OpenAIProvider(openai_client=client))
         model = model_override if model_override is not None else OpenAIChatModel(
-            model_name, provider=OpenRouterProvider(openai_client=client))
+            model_name, provider=provider)
         for name in config['nodes']:
             instructions = (
                 f'You are the evaluation judge {name}. Evaluate the supplied agent trace. '

@@ -12,6 +12,7 @@ FIELDS = [
     ('E2B_API_KEY', 'API keys', 'secret', ''),
     ('AGENT_NODE_MODEL', 'Models', 'text', 'google/gemini-2.5-flash'),
     ('AGENT_NODE_TEMPERATURE', 'Models', 'temperature', '0.1'),
+    ('LLM_BASE_URL', 'Endpoint', 'url', 'https://openrouter.ai/api/v1'),
     ('LANGFUSE_PUBLIC_KEY', 'Langfuse', 'secret', ''),
     ('LANGFUSE_SECRET_KEY', 'Langfuse', 'secret', ''),
     ('LANGFUSE_HOST', 'Langfuse', 'url', ''),

@@ -97,7 +97,7 @@ def get_env_settings():
             'secret_storage':storage,
             'read_only':settings_read_only(),
             'execution':'AI by default', 'applied_to_runner':True,
-            'runner_fields':['OPENROUTER_API_KEY','AGENT_NODE_MODEL','AGENT_NODE_TEMPERATURE']}
+            'runner_fields':['OPENROUTER_API_KEY','LLM_BASE_URL','AGENT_NODE_MODEL','AGENT_NODE_TEMPERATURE']}
 
 
 @app.put('/api/settings/env')
@@ -216,10 +216,11 @@ def ai_settings():
     if settings_read_only():
         model = os.environ.get('AGENT_NODE_MODEL', 'google/gemini-2.5-flash')
         temp = os.environ.get('AGENT_NODE_TEMPERATURE', '0.1')
+        base_url = os.environ.get('LLM_BASE_URL', 'https://openrouter.ai/api/v1')
         env_settings.validate('AGENT_NODE_MODEL', model)
         env_settings.validate('AGENT_NODE_TEMPERATURE', temp)
         key = os.environ.get('OPENROUTER_API_KEY', '')
-        return key, float(temp), model
+        return key, float(temp), model, base_url
     from dotenv import dotenv_values
     stored=stored_env()
     env=dotenv_values(ENV_PATH,interpolate=False) if ENV_PATH.exists() else {}
@@ -232,7 +233,8 @@ def ai_settings():
     fields={f['name']:f['value'] for f in get_env_settings()['fields']}
     temp=fields['AGENT_NODE_TEMPERATURE']
     env_settings.validate('AGENT_NODE_TEMPERATURE',temp)
-    return key,float(temp),fields['AGENT_NODE_MODEL']
+    base_url=fields.get('LLM_BASE_URL') or 'https://openrouter.ai/api/v1'
+    return key,float(temp),fields['AGENT_NODE_MODEL'],base_url
 
 
 def validate_ai(request):
@@ -258,7 +260,7 @@ def validate_ai(request):
         raise HTTPException(422,'Model ID must contain printable ASCII characters without spaces')
 
 
-async def execute_ai(key, secret, temperature):
+async def execute_ai(key, secret, temperature, base_url='https://openrouter.ai/api/v1'):
     def redact(value):
         if isinstance(value,str): return value.replace(secret,'[REDACTED]') if secret else value
         if isinstance(value,dict): return {k:redact(v) for k,v in value.items()}
@@ -276,7 +278,7 @@ async def execute_ai(key, secret, temperature):
     try:
         import ai_runner
         run=get_run(key)
-        result=await ai_runner.run(run['config'],run['steps'],secret,temperature,emit)
+        result=await ai_runner.run(run['config'],run['steps'],secret,temperature,emit,base_url=base_url)
         run=get_run(key)
         run.update(status='Completed',phase=3,**redact(result))
         run['verdict']=str(result['final_output'].get('verdict','Completed; inspect final JSON'))
@@ -425,7 +427,7 @@ async def create_run(request: RunRequest, http_request: Request):
     temperature=0.1
     if request.execution=='ai':
         validate_ai(request)
-        try: secret,temperature,default_model=ai_settings()
+        try: secret,temperature,default_model,base_url=ai_settings()
         except Exception: raise HTTPException(503,'Cannot read AI settings; check credential storage and temperature')
         if not secret:
             raise HTTPException(422,'Set OPENROUTER_API_KEY in Settings')
@@ -445,7 +447,7 @@ async def create_run(request: RunRequest, http_request: Request):
     if request.execution=='ai':
         run.update(execution='ai',verdict='Pending AI evaluation',usage={'calls':0,'tokens':0,'cost':None})
         put('runs',key,run)
-    tasks[key]=asyncio.create_task(execute_ai(key,secret,temperature) if request.execution=='ai' else execute(key,levels))
+    tasks[key]=asyncio.create_task(execute_ai(key,secret,temperature,base_url) if request.execution=='ai' else execute(key,levels))
     return run
 
 
