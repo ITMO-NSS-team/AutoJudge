@@ -29,7 +29,7 @@ AUTOJUDGE_DATA_DIR=/data/autojudge
 AUTOJUDGE_SETTINGS_READ_ONLY=1
 AUTOJUDGE_AI_ENABLED=1
 AUTOJUDGE_ALLOWED_ORIGINS=https://OWNER-SPACE.hf.space
-AGENT_NODE_MODEL=z-ai/glm-5.3-flash
+AGENT_NODE_MODEL=google/gemini-2.5-flash
 AGENT_NODE_TEMPERATURE=0.1
 ```
 
@@ -89,7 +89,7 @@ disabling dry runs or access to existing results.
 docker build -t autojudge-hf .
 docker run --rm -p 7860:7860 `
   -e AUTOJUDGE_ALLOWED_ORIGINS=http://127.0.0.1:7860 `
-  -e AGENT_NODE_MODEL=z-ai/glm-5.3-flash `
+  -e AGENT_NODE_MODEL=google/gemini-2.5-flash `
   -e AGENT_NODE_TEMPERATURE=0.1 `
   -v autojudge-data:/data `
   autojudge-hf
