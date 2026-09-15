@@ -23,9 +23,9 @@ spaces. Saving settings never contacts the provider.
 Secrets use Windows DPAPI, macOS Keychain, or Linux Secret Service through
 `keyring`. They are never returned by the API or stored in workspace snapshots.
 
-For a temporary authenticated tunnel, set `AUTOJUDGE_ALLOWED_ORIGINS` to the
-exact external HTTPS origin. Multiple origins are comma-separated. This extends
-origin checks for settings and AI runs; never use a wildcard.
+For a remote deployment, set `AUTOJUDGE_ALLOWED_ORIGINS` to the exact external
+HTTPS origin. Multiple origins are comma-separated. This extends origin checks
+for settings and AI runs; never use a wildcard.
 
 ## Evaluation contract
 

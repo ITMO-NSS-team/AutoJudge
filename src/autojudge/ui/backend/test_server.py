@@ -138,12 +138,12 @@ class ApiTests(unittest.TestCase):
                 self.assertEqual(server.records('credentials'), [])
 
     def test_remote_origin_is_explicitly_configurable(self):
-        allowed='https://autojudge-test.ngrok-free.app'
+        allowed='https://autojudge-preview.example.test'
         with tempfile.TemporaryDirectory() as directory, patch.object(server, 'DB_PATH', Path(directory)/'test.sqlite'), patch.object(server, 'ENV_PATH', Path(directory)/'.env'), patch.dict('os.environ', {'AUTOJUDGE_ALLOWED_ORIGINS':allowed}, clear=True):
             with TestClient(server.app) as client:
                 path='/api/settings/env'
                 self.assertEqual(client.put(path,json={'values':{'DB_PORT':'5433'}},headers={'Origin':allowed}).status_code,200)
-                self.assertEqual(client.put(path,json={'values':{'DB_PORT':'5434'}},headers={'Origin':'https://other.ngrok-free.app'}).status_code,403)
+                self.assertEqual(client.put(path,json={'values':{'DB_PORT':'5434'}},headers={'Origin':'https://other.example.test'}).status_code,403)
 
     def test_lifecycle(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(server, 'DB_PATH', Path(directory)/'test.sqlite'):
