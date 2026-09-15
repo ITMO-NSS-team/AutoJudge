@@ -120,6 +120,8 @@ async def save_env_settings(request: Request):
         updates={}
         for name,value in values.items():
             kind=env_settings.validate(name,value)
+            if kind=='secret':
+                value=value.strip()
             updates[name]=credentials.store(name,value) if kind=='secret' and value else {'disabled':True} if kind=='secret' else {'value':value}
     except (ValueError,TypeError,StopIteration):
         raise HTTPException(422,'Invalid settings: check names, temperature (0–2), port (1–65535), and URL')
@@ -181,8 +183,6 @@ async def set_credential(request: Request):
         if not isinstance(secret, str) or not 16 <= len(secret.strip()) <= 4096:
             raise ValueError()
         secret = secret.strip()
-        if any(c.isspace() for c in secret):
-            raise ValueError()
     except (ValueError, TypeError):
         raise HTTPException(422, 'Enter a key of 16–4096 characters without whitespace')
     try:
