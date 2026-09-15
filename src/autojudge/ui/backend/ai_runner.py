@@ -51,6 +51,8 @@ class ObservedPipeline(Pipeline):
             self.emit(node.name, {'status':'Cancelled', 'usage_unknown':True})
             raise
         except Exception:
+            import loguru
+            loguru.logger.exception('AI node {} failed', node.name)
             self.emit(node.name, {'status':'Failed', 'usage_unknown':True,
                       'error':'Model request failed; check provider access, model and limits.'})
             raise RuntimeError('Model request failed') from None
