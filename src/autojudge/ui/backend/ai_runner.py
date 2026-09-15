@@ -12,12 +12,13 @@ from autojudge.pipeline import AgentNode, Pipeline, PipelineBuilder
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openrouter import OpenRouterProvider
-from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.usage import UsageLimits
 from jsonschema import Draft202012Validator
 import httpx
 from httpx import AsyncClient
 from openai import AsyncOpenAI
+
+OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
 
 
 class LimitedAgent:
@@ -59,12 +60,10 @@ async def run(config, steps, key, temperature, emit, model_override=None):
     model_name = config['model']
     nodes=[]
     async with AsyncClient(timeout=60) as transport:
-        base_url = config.get('applied_base_url', 'https://openrouter.ai/api/v1')
-        client = AsyncOpenAI(base_url=base_url, api_key=key or 'local-no-key',
+        client = AsyncOpenAI(base_url=OPENROUTER_BASE_URL, api_key=key,
                              max_retries=0, http_client=transport)
-        provider_type = OpenRouterProvider if base_url.rstrip('/') == 'https://openrouter.ai/api/v1' else OpenAIProvider
         model = model_override if model_override is not None else OpenAIChatModel(
-            model_name, provider=provider_type(openai_client=client))
+            model_name, provider=OpenRouterProvider(openai_client=client))
         for name in config['nodes']:
             instructions = (
                 f'You are the evaluation judge {name}. Evaluate the supplied agent trace. '

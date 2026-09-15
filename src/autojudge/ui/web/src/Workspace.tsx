@@ -1066,7 +1066,7 @@ export default function Workspace() {
                         {execution === "ai" && (
                           <div className="finding">
                             <p>
-                              Endpoint from Settings ·{" "}
+                              OpenRouter API ·{" "}
                               {activeModelLabel}
                             </p>
                           </div>

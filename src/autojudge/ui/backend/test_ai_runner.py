@@ -25,17 +25,17 @@ def answer(messages, info):
 
 
 class RunnerTests(unittest.IsolatedAsyncioTestCase):
-    async def test_custom_endpoint(self):
+    async def test_openrouter_endpoint_and_key(self):
         import httpx
         def handler(request):
-            self.assertEqual(str(request.url), 'https://custom.example/v1/chat/completions')
-            self.assertEqual(json.loads(request.content)['model'], 'custom-model')
+            self.assertEqual(str(request.url), 'https://openrouter.ai/api/v1/chat/completions')
+            self.assertEqual(json.loads(request.content)['model'], 'test/custom-model')
             self.assertEqual(request.headers['authorization'], 'Bearer custom-key')
-            return httpx.Response(200,json={'id':'test','object':'chat.completion','created':0,'model':'custom-model',
+            return httpx.Response(200,json={'id':'test','object':'chat.completion','created':0,'model':'test/custom-model',
                 'choices':[{'index':0,'message':{'role':'assistant','content':'{"verdict":"ok"}'},'finish_reason':'stop'}]})
         original_client=httpx.AsyncClient
         with patch.object(ai_runner,'AsyncClient',side_effect=lambda **kw: original_client(transport=httpx.MockTransport(handler),**kw)), patch('socket.socket.connect',side_effect=AssertionError('Network forbidden')):
-            result=await ai_runner.run({**CONFIG,'model':'custom-model','applied_base_url':'https://custom.example/v1'},STEPS,'custom-key',0.1,lambda n,o:None)
+            result=await ai_runner.run({**CONFIG,'model':'test/custom-model'},STEPS,'custom-key',0.1,lambda n,o:None)
         self.assertEqual(result['final_output']['verdict'],'ok')
 
     async def test_openrouter_sdk_with_mock_http(self):
@@ -98,7 +98,7 @@ class IntegrationTests(unittest.TestCase):
         real_run=ai_runner.run
         async def local_run(config,steps,key,temp,emit):
             return await real_run(config,steps,key,temp,emit,FunctionModel(answer))
-        with tempfile.TemporaryDirectory() as directory, patch.object(server,'DB_PATH',Path(directory)/'test.sqlite'), patch.object(server,'ai_settings',return_value=('test-secret',0.1,'test/model','https://openrouter.ai/api/v1')), patch.object(ai_runner,'run',side_effect=local_run), models.override_allow_model_requests(False):
+        with tempfile.TemporaryDirectory() as directory, patch.object(server,'DB_PATH',Path(directory)/'test.sqlite'), patch.object(server,'ai_settings',return_value=('test-secret',0.1,'test/model')), patch.object(ai_runner,'run',side_effect=local_run), models.override_allow_model_requests(False):
             with TestClient(server.app) as client:
                 data={'config':CONFIG,'steps':STEPS,'execution':'ai'}
                 headers={'Origin':'http://127.0.0.1:5173'}

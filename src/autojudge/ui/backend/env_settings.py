@@ -6,8 +6,6 @@ from dotenv import dotenv_values
 
 # Template defaults are suggestions; runtime defaults are documented explicitly.
 FIELDS = [
-    ('LLM_BASE_URL', 'AI connection', 'url', 'https://openrouter.ai/api/v1'),
-    ('LLM_API_KEY', 'AI connection', 'secret', ''),
     ('OPENROUTER_API_KEY', 'API keys', 'secret', ''),
     ('HF_TOKEN', 'API keys', 'secret', ''),
     ('GITHUB_TOKEN', 'API keys', 'secret', ''),
@@ -67,9 +65,4 @@ def validate(name, value):
         parsed = urlparse(value)
         if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
             raise ValueError('Use HTTP(S) URL without credentials or query')
-    if name == 'LLM_BASE_URL':
-        from urllib.parse import urlparse
-        parsed = urlparse(value)
-        if not value or (parsed.scheme == 'http' and parsed.hostname not in ('localhost', '127.0.0.1', '::1')):
-            raise ValueError('Use HTTPS, or HTTP on localhost only')
     return kind

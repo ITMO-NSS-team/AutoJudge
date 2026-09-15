@@ -91,14 +91,16 @@ has survived an actual Space restart with the bucket attached.
 
 ### 4. Provider secrets
 
-Create these Hugging Face Secrets:
+Create this Hugging Face Secret and these non-secret variables:
 
 ```text
-LLM_API_KEY
-LLM_BASE_URL
+OPENROUTER_API_KEY
 AGENT_NODE_MODEL
 AGENT_NODE_TEMPERATURE
 ```
+
+The backend uses only the fixed `https://openrouter.ai/api/v1` endpoint; the
+deployment cannot replace it with an arbitrary provider URL.
 
 Do not use Windows DPAPI, macOS Keychain, or Linux Secret Service in the container.
 Deployment mode must read provider values directly from environment variables.

@@ -29,14 +29,13 @@ AUTOJUDGE_DATA_DIR=/data/autojudge
 AUTOJUDGE_SETTINGS_READ_ONLY=1
 AUTOJUDGE_AI_ENABLED=1
 AUTOJUDGE_ALLOWED_ORIGINS=https://OWNER-SPACE.hf.space
-LLM_BASE_URL=https://PROVIDER.example/v1
-AGENT_NODE_MODEL=provider/model-id
+AGENT_NODE_MODEL=z-ai/glm-5.3-flash
 AGENT_NODE_TEMPERATURE=0.1
 ```
 
 Replace `OWNER-SPACE.hf.space` with the actual direct Space application origin. Keep
-the origin exact and HTTPS. Variables are visible to Space collaborators, so use a
-Secret instead when the provider base URL itself is sensitive.
+the origin exact and HTTPS. The provider endpoint is fixed in the backend to
+`https://openrouter.ai/api/v1`.
 
 The ordinary Space filesystem is ephemeral. Run history is durable only after the
 bucket is attached and a restart test confirms that
@@ -44,16 +43,15 @@ bucket is attached and a restart test confirms that
 
 ## 3. Configure secrets
 
-Add one of these under Space Settings → Secrets:
+Add this under Space Settings → Secrets:
 
 ```text
-LLM_API_KEY=...
+OPENROUTER_API_KEY=...
 ```
 
-For the standard OpenRouter endpoint, `OPENROUTER_API_KEY` is also supported when
-`LLM_API_KEY` is absent. Do not commit secrets, add them as Docker build arguments,
-or enter them through the deployed AutoJudge Settings page. Hosted environment
-settings are intentionally read-only.
+Do not commit the secret, add it as a Docker build argument, or enter it through the
+deployed AutoJudge Settings page. Hosted environment settings are intentionally
+read-only.
 
 ## 4. Deploy
 
@@ -91,13 +89,12 @@ disabling dry runs or access to existing results.
 docker build -t autojudge-hf .
 docker run --rm -p 7860:7860 `
   -e AUTOJUDGE_ALLOWED_ORIGINS=http://127.0.0.1:7860 `
-  -e LLM_BASE_URL=https://provider.example/v1 `
-  -e AGENT_NODE_MODEL=provider/model-id `
+  -e AGENT_NODE_MODEL=z-ai/glm-5.3-flash `
   -e AGENT_NODE_TEMPERATURE=0.1 `
   -v autojudge-data:/data `
   autojudge-hf
 ```
 
-Omit `LLM_API_KEY` for dry-run verification. Add it only as an environment variable
+Omit `OPENROUTER_API_KEY` for dry-run verification. Add it only as an environment variable
 for an explicitly authorized AI smoke test; never place its value in shell history or
 documentation.

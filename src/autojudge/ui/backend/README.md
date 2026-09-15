@@ -15,10 +15,10 @@ Swagger is available at `http://127.0.0.1:8000/docs`.
 
 ## AI connection
 
-The runner uses `LLM_BASE_URL`, `LLM_API_KEY`, `AGENT_NODE_MODEL`, and
-`AGENT_NODE_TEMPERATURE`. `OPENROUTER_API_KEY` is a compatibility fallback only
-for the standard OpenRouter endpoint. Model IDs must use printable ASCII without
-spaces. Saving settings never contacts the provider.
+The runner uses the fixed `https://openrouter.ai/api/v1` endpoint with
+`OPENROUTER_API_KEY`, `AGENT_NODE_MODEL`, and `AGENT_NODE_TEMPERATURE`. Model IDs
+must use printable ASCII without spaces. Saving settings never contacts the
+provider.
 
 Secrets use Windows DPAPI, macOS Keychain, or Linux Secret Service through
 `keyring`. They are never returned by the API or stored in workspace snapshots.

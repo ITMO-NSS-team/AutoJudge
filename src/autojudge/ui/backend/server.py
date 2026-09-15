@@ -97,7 +97,7 @@ def get_env_settings():
             'secret_storage':storage,
             'read_only':settings_read_only(),
             'execution':'AI by default', 'applied_to_runner':True,
-            'runner_fields':['LLM_BASE_URL','LLM_API_KEY','OPENROUTER_API_KEY','AGENT_NODE_MODEL','AGENT_NODE_TEMPERATURE']}
+            'runner_fields':['OPENROUTER_API_KEY','AGENT_NODE_MODEL','AGENT_NODE_TEMPERATURE']}
 
 
 @app.put('/api/settings/env')
@@ -214,16 +214,12 @@ class RunRequest(BaseModel):
 
 def ai_settings():
     if settings_read_only():
-        endpoint = os.environ.get('LLM_BASE_URL', 'https://openrouter.ai/api/v1').rstrip('/')
         model = os.environ.get('AGENT_NODE_MODEL', 'google/gemini-2.5-flash')
         temp = os.environ.get('AGENT_NODE_TEMPERATURE', '0.1')
-        env_settings.validate('LLM_BASE_URL', endpoint)
         env_settings.validate('AGENT_NODE_MODEL', model)
         env_settings.validate('AGENT_NODE_TEMPERATURE', temp)
-        key = os.environ.get('LLM_API_KEY', '')
-        if not key and endpoint == 'https://openrouter.ai/api/v1':
-            key = os.environ.get('OPENROUTER_API_KEY', '')
-        return key, float(temp), model, endpoint
+        key = os.environ.get('OPENROUTER_API_KEY', '')
+        return key, float(temp), model
     from dotenv import dotenv_values
     stored=stored_env()
     env=dotenv_values(ENV_PATH,interpolate=False) if ENV_PATH.exists() else {}
@@ -236,15 +232,7 @@ def ai_settings():
     fields={f['name']:f['value'] for f in get_env_settings()['fields']}
     temp=fields['AGENT_NODE_TEMPERATURE']
     env_settings.validate('AGENT_NODE_TEMPERATURE',temp)
-    endpoint = fields['LLM_BASE_URL'].rstrip('/')
-    env_settings.validate('LLM_BASE_URL', endpoint)
-    if 'LLM_API_KEY' in stored:
-        key = credentials.load('LLM_API_KEY',stored['LLM_API_KEY'])
-    elif 'LLM_API_KEY' in os.environ or env.get('LLM_API_KEY'):
-        key = os.environ.get('LLM_API_KEY', env.get('LLM_API_KEY') or '')
-    elif endpoint != 'https://openrouter.ai/api/v1':
-        key = ''  # Never send the legacy OpenRouter credential to another provider.
-    return key,float(temp),fields['AGENT_NODE_MODEL'],endpoint
+    return key,float(temp),fields['AGENT_NODE_MODEL']
 
 
 def validate_ai(request):
@@ -437,18 +425,16 @@ async def create_run(request: RunRequest, http_request: Request):
     temperature=0.1
     if request.execution=='ai':
         validate_ai(request)
-        try: secret,temperature,default_model,endpoint=ai_settings()
+        try: secret,temperature,default_model=ai_settings()
         except Exception: raise HTTPException(503,'Cannot read AI settings; check credential storage and temperature')
-        from urllib.parse import urlparse
-        if not secret and urlparse(endpoint).hostname not in ('localhost','127.0.0.1','::1'):
-            raise HTTPException(422,'Set LLM_API_KEY in Settings (OPENROUTER_API_KEY is only used for OpenRouter)')
+        if not secret:
+            raise HTTPException(422,'Set OPENROUTER_API_KEY in Settings')
         if not request.config.get('model','').strip() or request.config['model']=='openrouter/auto':
             request.config['model']=default_model
         if not request.config['model']:
             raise HTTPException(422,'Set the provider model ID in AGENT_NODE_MODEL')
         if not env_settings.valid_model_id(request.config['model']):
             raise HTTPException(422,'Model ID must contain printable ASCII characters without spaces')
-        request.config['applied_base_url']=endpoint
         request.config['applied_temperature']=temperature
         request.config['max_output_tokens']=1024
         try: import ai_runner

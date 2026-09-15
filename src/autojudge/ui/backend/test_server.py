@@ -12,8 +12,7 @@ class ApiTests(unittest.TestCase):
     def test_hosted_environment_settings_are_read_only(self):
         hosted = {
             'AUTOJUDGE_SETTINGS_READ_ONLY': '1',
-            'LLM_BASE_URL': 'https://provider.example/v1',
-            'LLM_API_KEY': 'hosted-test-secret',
+            'OPENROUTER_API_KEY': 'hosted-test-secret',
             'AGENT_NODE_MODEL': 'test/hosted-model',
             'AGENT_NODE_TEMPERATURE': '0.4',
             'AUTOJUDGE_AI_ENABLED': '0',
@@ -27,7 +26,7 @@ class ApiTests(unittest.TestCase):
                 response = client.get('/api/settings/env')
                 self.assertTrue(response.json()['read_only'])
                 self.assertEqual(response.json()['secret_storage']['name'], 'Hosting environment')
-                self.assertNotIn(hosted['LLM_API_KEY'], response.text)
+                self.assertNotIn(hosted['OPENROUTER_API_KEY'], response.text)
                 self.assertFalse(client.get('/api/health').json()['ai_available'])
                 self.assertEqual(
                     client.put('/api/settings/env', json={'values': {}}, headers={
@@ -56,7 +55,7 @@ class ApiTests(unittest.TestCase):
                 self.assertEqual(client.post('/api/runs', json=ai_request).status_code, 503)
             self.assertEqual(
                 server.ai_settings(),
-                ('hosted-test-secret', 0.4, 'test/hosted-model', 'https://provider.example/v1'),
+                ('hosted-test-secret', 0.4, 'test/hosted-model'),
             )
 
     def test_frontend_build_and_spa_fallback_are_served(self):
@@ -77,14 +76,14 @@ class ApiTests(unittest.TestCase):
         with patch.object(server.credentials.sys,'platform','linux'), patch.object(
             server.credentials,'storage_info',return_value={'name':'Linux Secret Service','available':True,'persistent':True}
         ), patch('keyring.set_password') as save, patch('keyring.get_password',return_value=secret) as load, patch('keyring.delete_password') as remove:
-            payload=server.credentials.store('LLM_API_KEY',secret)
+            payload=server.credentials.store('OPENROUTER_API_KEY',secret)
             self.assertEqual(payload,{'keyring':True,'storage':'keyring'})
             self.assertNotIn(secret,json.dumps(payload))
-            self.assertEqual(server.credentials.load('LLM_API_KEY',payload),secret)
-            server.credentials.remove('LLM_API_KEY',payload)
-            save.assert_called_once_with('AutoJudge','LLM_API_KEY',secret)
-            load.assert_called_once_with('AutoJudge','LLM_API_KEY')
-            remove.assert_called_once_with('AutoJudge','LLM_API_KEY')
+            self.assertEqual(server.credentials.load('OPENROUTER_API_KEY',payload),secret)
+            server.credentials.remove('OPENROUTER_API_KEY',payload)
+            save.assert_called_once_with('AutoJudge','OPENROUTER_API_KEY',secret)
+            load.assert_called_once_with('AutoJudge','OPENROUTER_API_KEY')
+            remove.assert_called_once_with('AutoJudge','OPENROUTER_API_KEY')
 
     def test_env_settings(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(server, 'DB_PATH', Path(directory)/'test.sqlite'), patch.object(server, 'ENV_PATH', Path(directory)/'.env'), patch.dict('os.environ', {}, clear=True):
@@ -92,7 +91,7 @@ class ApiTests(unittest.TestCase):
                 headers={'Origin':'http://127.0.0.1:5173'}
                 path='/api/settings/env'
                 fields=client.get(path).json()['fields']
-                self.assertEqual(len(fields),16)
+                self.assertEqual(len(fields),14)
                 self.assertNotIn('MCP models',{field['group'] for field in fields})
                 values={'HF_TOKEN':'fake-token-for-offline-test','DB_PORT':'5433','AGENT_NODE_TEMPERATURE':'0.7'}
                 response=client.put(path,json={'values':values},headers=headers)
