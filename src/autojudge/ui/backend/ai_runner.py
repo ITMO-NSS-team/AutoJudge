@@ -50,7 +50,9 @@ class ObservedPipeline(Pipeline):
         except asyncio.CancelledError:
             self.emit(node.name, {'status':'Cancelled', 'usage_unknown':True})
             raise
-        except Exception:
+        except Exception as exc:
+            import loguru
+            loguru.logger.exception('AI node failed: {}: {}', type(exc).__name__, str(exc)[:400])
             self.emit(node.name, {'status':'Failed', 'usage_unknown':True,
                       'error':'Model request failed; check provider access, model and limits.'})
             raise RuntimeError('Model request failed') from None
