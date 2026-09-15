@@ -43,15 +43,22 @@ bucket is attached and a restart test confirms that
 
 ## 3. Configure secrets
 
-Add this under Space Settings → Secrets:
+Add these under Space Settings → Secrets:
 
 ```text
 OPENROUTER_API_KEY=...
+AUTOJUDGE_CREDENTIALS_KEY=...
 ```
 
-Do not commit the secret, add it as a Docker build argument, or enter it through the
-deployed AutoJudge Settings page. Hosted environment settings are intentionally
-read-only.
+`AUTOJUDGE_CREDENTIALS_KEY` is a random string (for example
+`python -c "import secrets; print(secrets.token_urlsafe(32))"`). When it is set,
+credentials entered through the deployed Settings page are encrypted at rest in the
+workspace database with this master key; without it, secret entry through the UI is
+rejected because the container has no OS keychain. If the master key is lost, stored
+credentials cannot be decrypted and must be re-entered.
+
+Do not commit any secret or add it as a Docker build argument. Never place the
+OpenRouter key in shell history or documentation.
 
 ## 4. Deploy
 

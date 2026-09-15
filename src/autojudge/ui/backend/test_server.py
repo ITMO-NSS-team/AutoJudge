@@ -58,6 +58,28 @@ class ApiTests(unittest.TestCase):
                 ('hosted-test-secret', 0.4, 'test/hosted-model'),
             )
 
+    def test_master_key_storage_encrypts_at_rest(self):
+        secret='master-key-storage-test-secret'
+        headers={'Origin':'http://127.0.0.1:5173'}
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            server, 'DB_PATH', Path(directory)/'test.sqlite'
+        ), patch.object(server, 'ENV_PATH', Path(directory)/'.env'), patch.dict(
+            'os.environ', {'AUTOJUDGE_CREDENTIALS_KEY':'unit-test-master-key'}, clear=True
+        ), patch.object(server.credentials.sys, 'platform', 'linux'):
+            with TestClient(server.app) as client:
+                storage=client.get('/api/settings/env').json()['secret_storage']
+                self.assertEqual(storage['name'], 'Encrypted container storage')
+                self.assertTrue(storage['available'])
+                path='/api/credentials/openrouter'
+                response=client.put(path, json={'key':secret}, headers=headers)
+                self.assertEqual(response.status_code, 200)
+                self.assertTrue(response.json()['configured'])
+                self.assertNotIn(secret, response.text)
+                payload=server.records('credentials')[0]
+                self.assertEqual(payload.get('storage'), 'master-key')
+                self.assertNotIn(secret.encode(), server.DB_PATH.read_bytes())
+                self.assertEqual(server.credentials.load('OPENROUTER_API_KEY', payload), secret)
+
     def test_frontend_build_and_spa_fallback_are_served(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(
             server, 'WEB_DIST', Path(directory)

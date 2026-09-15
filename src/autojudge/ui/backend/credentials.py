@@ -1,10 +1,20 @@
 """Cross-platform OS credential storage. Never fall back to plaintext."""
 import base64
 import ctypes
+import hashlib
+import os
 import sys
 from ctypes import wintypes
 
 SERVICE = 'AutoJudge'
+
+
+def master_key():
+    """Fernet key derived from AUTOJUDGE_CREDENTIALS_KEY; None when unset."""
+    secret = os.environ.get('AUTOJUDGE_CREDENTIALS_KEY', '').strip()
+    if not secret:
+        return None
+    return base64.urlsafe_b64encode(hashlib.sha256(secret.encode('utf-8')).digest())
 
 
 class Blob(ctypes.Structure):
@@ -46,6 +56,8 @@ def decrypt(ciphertext: str) -> str:
 def storage_info():
     if sys.platform == 'win32':
         return {'name':'Windows DPAPI','available':True,'persistent':True}
+    if master_key() is not None:
+        return {'name':'Encrypted container storage','available':True,'persistent':True}
     name = 'macOS Keychain' if sys.platform == 'darwin' else 'Linux Secret Service'
     try:
         import keyring
@@ -59,6 +71,8 @@ def storage_info():
 def store(name: str, secret: str):
     if sys.platform == 'win32':
         return {'ciphertext':encrypt(secret),'storage':'dpapi'}
+    if master_key() is not None:
+        return {'ciphertext':ferni_encrypt(secret),'storage':'master-key'}
     if not storage_info()['available']:
         raise RuntimeError('Persistent OS credential storage is unavailable')
     try:
@@ -72,6 +86,8 @@ def store(name: str, secret: str):
 def load(name: str, payload: dict) -> str:
     ciphertext=payload.get('ciphertext','')
     if ciphertext:
+        if payload.get('storage')=='master-key':
+            return ferni_decrypt(ciphertext)
         return decrypt(ciphertext)
     if not payload.get('keyring'):
         return ''
@@ -83,7 +99,9 @@ def load(name: str, payload: dict) -> str:
 
 
 def remove(name: str, payload: dict | None = None):
-    if not payload or not payload.get('keyring'):
+    if not payload or payload.get('storage') == 'master-key':
+        return
+    if not payload.get('keyring'):
         return
     try:
         import keyring
@@ -96,3 +114,19 @@ def remove(name: str, payload: dict | None = None):
 
 def configured(payload: dict) -> bool:
     return bool(payload.get('ciphertext') or payload.get('keyring')) and not payload.get('disabled',False)
+
+
+def ferni_encrypt(secret: str) -> str:
+    try:
+        from cryptography.fernet import Fernet
+        return Fernet(master_key()).encrypt(secret.encode('utf-8')).decode('ascii')
+    except Exception as exc:
+        raise RuntimeError('Encrypted credential storage unavailable') from exc
+
+
+def ferni_decrypt(ciphertext: str) -> str:
+    try:
+        from cryptography.fernet import Fernet
+        return Fernet(master_key()).decrypt(ciphertext.encode('ascii')).decode('utf-8')
+    except Exception as exc:
+        raise RuntimeError('Encrypted credential storage unavailable') from exc
