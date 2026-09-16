@@ -4,17 +4,22 @@ import { readFileSync } from 'node:fs';
 import { exampleOutputSchema, exampleTaxonomy } from '../src/designTemplate.ts';
 import { parseDesignFile } from '../src/imports.ts';
 
-test('example template uses final attribution contract, not specialist score', () => {
-  const schema=JSON.parse(parseDesignFile('schema',JSON.stringify(exampleOutputSchema)));
-  assert.deepEqual(schema.required,['agent','step','reason']);
-  assert.equal(schema.additionalProperties,false);
-  const pattern=new RegExp(schema.properties.step.pattern);
-  assert.ok(pattern.test('4'));
-  for(const value of ['0','-1','4.5','step 4'])assert.equal(pattern.test(value),false);
+test('example output schema documents the README errors/scores format', () => {
+  assert.match(exampleOutputSchema, /"errors":/);
+  assert.match(exampleOutputSchema, /"scores":/);
+  assert.match(exampleOutputSchema, /HIGH\|MEDIUM\|LOW/);
+  // Placeholders like "0-5" are not valid JSON, so this is a free-form
+  // format instruction, not a strict schema, and must not parse as JSON.
+  assert.throws(() => JSON.parse(exampleOutputSchema));
+  // The runner still accepts it, as text, through the free-form fallback.
+  assert.equal(parseDesignFile('schema', exampleOutputSchema), exampleOutputSchema);
 });
-test('example taxonomy contains judge and final attribution guidance', () => {
-  assert.match(exampleTaxonomy, /Search integrity/);
-  assert.match(exampleTaxonomy, /Final attribution/);
+test('example taxonomy matches the README reasoning/execution/planning tree', () => {
+  assert.match(exampleTaxonomy, /Reasoning Errors/);
+  assert.match(exampleTaxonomy, /Hallucinations/);
+  assert.match(exampleTaxonomy, /System Execution Errors/);
+  assert.match(exampleTaxonomy, /Planning and Coordination Errors/);
+  assert.equal(parseDesignFile('taxonomy', exampleTaxonomy), exampleTaxonomy);
 });
 test('judge model is selected only through environment settings', () => {
   const workspace = readFileSync(new URL('../src/Workspace.tsx', import.meta.url), 'utf8');

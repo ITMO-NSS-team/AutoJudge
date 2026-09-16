@@ -7,20 +7,12 @@ from dotenv import dotenv_values
 # Template defaults are suggestions; runtime defaults are documented explicitly.
 FIELDS = [
     ('OPENROUTER_API_KEY', 'API keys', 'secret', ''),
-    ('HF_TOKEN', 'API keys', 'secret', ''),
-    ('GITHUB_TOKEN', 'API keys', 'secret', ''),
-    ('E2B_API_KEY', 'API keys', 'secret', ''),
     ('AGENT_NODE_MODEL', 'Models', 'text', 'google/gemini-2.5-flash'),
-    ('AGENT_NODE_TEMPERATURE', 'Models', 'temperature', '0.1'),
-    ('LLM_BASE_URL', 'Endpoint', 'url', 'https://openrouter.ai/api/v1'),
-    ('LANGFUSE_PUBLIC_KEY', 'Langfuse', 'secret', ''),
-    ('LANGFUSE_SECRET_KEY', 'Langfuse', 'secret', ''),
-    ('LANGFUSE_HOST', 'Langfuse', 'url', ''),
-    ('DB_NAME', 'PostgreSQL', 'text', 'maseval'),
-    ('DB_USER', 'PostgreSQL', 'text', 'postgres'),
-    ('DB_PASSWORD', 'PostgreSQL', 'secret', ''),
-    ('DB_HOST', 'PostgreSQL', 'text', 'localhost'),
-    ('DB_PORT', 'PostgreSQL', 'port', '5432'),
+    ('AGENT_NODE_TEMPERATURE', 'Models', 'temperature', '0'),
+    # Meta Agent that generates the judge pool; kept separate from the judge
+    # execution model above.
+    ('META_AGENT_MODEL', 'Models', 'text', 'google/gemini-2.5-flash'),
+    ('ENDPOINT_API_URL', 'Endpoint', 'url', 'https://openrouter.ai/api/v1'),
 ]
 
 MODEL_ID = re.compile(r'^[\x21-\x7e]{1,200}$')
@@ -42,7 +34,7 @@ def resolve(path, stored, legacy):
                 stored[name].get('ciphertext') or stored[name].get('keyring') or '')
         elif name == 'OPENROUTER_API_KEY' and legacy:
             source, value = 'saved', 'encrypted'
-        if name == 'AGENT_NODE_MODEL' and not valid_model_id(value):
+        if name.endswith('_MODEL') and not valid_model_id(value):
             value = values.get(name) or default
             source = '.env' if values.get(name) else 'default'
         result.append({'name':name, 'group':group, 'kind':kind, 'source':source,
@@ -57,7 +49,7 @@ def validate(name, value):
         raise ValueError('Invalid setting')
     if kind == 'temperature' and (not math.isfinite(float(value)) or not 0 <= float(value) <= 2):
         raise ValueError('Temperature must be between 0 and 2')
-    if name == 'AGENT_NODE_MODEL' and not valid_model_id(value):
+    if name.endswith('_MODEL') and not valid_model_id(value):
         raise ValueError('Model ID must contain printable ASCII characters without spaces')
     if kind == 'port' and (not value.isdecimal() or not 1 <= int(value) <= 65535):
         raise ValueError('Port must be between 1 and 65535')

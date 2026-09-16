@@ -1,5 +1,7 @@
+import json
 import os
-from typing import TYPE_CHECKING, Optional
+import re
+from typing import TYPE_CHECKING, Any, Optional
 
 from autojudge.pipeline.pipeline_builder import PipelineBuilder
 from autojudge.pipeline.types import GraphDict
@@ -26,6 +28,45 @@ def get_parallel_graph(agent_pool: AgentPool) -> GraphDict:
     return graph_dict
 
 
+def parse_graph(output: Any) -> GraphDict:
+    """Read the adjacency list the model returned as JSON text.
+
+    The graph is an open-ended map, which several providers cannot express as a
+    structured-output schema: their function-call schema keeps only declared
+    properties, so the model can answer nothing but an empty object. The prompt
+    already asks for a bare JSON object, so it is parsed from text instead.
+    """
+    if isinstance(output, dict):
+        graph = output
+    else:
+        if not isinstance(output, str):
+            raise ValueError(f"Graph response is not JSON, got {type(output).__name__}")
+        text = output.strip().lstrip("﻿")
+        fenced = re.fullmatch(
+            r"`{2,}\s*(?:json)?\s*(.*?)\s*`{2,}", text, flags=re.IGNORECASE | re.DOTALL
+        )
+        if fenced:
+            text = fenced.group(1).strip()
+        try:
+            graph = json.loads(text)
+        except json.JSONDecodeError as error:
+            raise ValueError(f"Graph response is not valid JSON: {error}") from None
+    if not isinstance(graph, dict) or not graph:
+        raise ValueError("Graph response must be a non-empty JSON object")
+    parsed: GraphDict = {}
+    for name, children in graph.items():
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("Graph keys must be agent names")
+        if children is None:
+            children = []
+        if not isinstance(children, list) or any(
+            not isinstance(child, str) for child in children
+        ):
+            raise ValueError(f"Children of '{name}' must be a list of agent names")
+        parsed[name] = children
+    return parsed
+
+
 class GraphGenerator(BaseMetaAgent):
     def __init__(
         self,
@@ -41,7 +82,8 @@ class GraphGenerator(BaseMetaAgent):
         return DEFAULT_GRAPH_INSTRUCT.substitute()
 
     def _get_output_type(self):
-        return GraphDict
+        # Text, not a structured map: see parse_graph.
+        return str
 
     def _validate_response(
         self, graph_dict: GraphDict, agent_pool: "AgentPool"
@@ -109,7 +151,7 @@ Design the workflow graph for the given task and agent pool.
         if context:
             user_prompt += f"\n\nPREVIOUS ATTEMPT FEEDBACK:\n{context}"
 
-        graph_dict = await self._run_agent(user_prompt)
+        graph_dict = parse_graph(await self._run_agent(user_prompt))
 
         self._validate_response(graph_dict, agent_pool)
         self._validate_graph(agent_pool, graph_dict)

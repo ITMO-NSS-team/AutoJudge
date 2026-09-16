@@ -16,6 +16,8 @@ import {
   Server,
   Cpu,
   AlertTriangle,
+  Sparkles,
+  RotateCcw,
 } from "lucide-react";
 import "./tokens.css";
 import "./workspace.css";
@@ -27,10 +29,27 @@ import { api } from "./apiClient";
 import { exampleOutputSchema, exampleTaxonomy } from "./designTemplate";
 import { fewShotPresets } from "./fewShotPresets";
 import { normalizeTrace, parseDesignFile } from "./imports";
+import {
+  designKey,
+  designSourceHint as sourceHintFor,
+  designStateLabel as stateLabelFor,
+  nextDesignState,
+  runBlockedReason as blockedReasonFor,
+} from "./designState";
+import type {
+  Design,
+  DesignMetadata,
+  DesignSource,
+  DesignState,
+  JudgeMetadata,
+} from "./designState";
 
 type Step = { id: number; agent: string; content: string };
 type Config = {
   judge_instructions?: Record<string, string>;
+  judges?: JudgeMetadata[];
+  design_source?: DesignSource;
+  design_id?: string;
   name: string;
   objective: string;
   taxonomy: string;
@@ -77,12 +96,8 @@ const icons = [
   Activity,
   Settings,
 ];
-const roles = [
-  "SOURCE_FACTUALITY_JUDGE",
-  "CONSTRAINT_COMPLETION_JUDGE",
-  "EXECUTION_STRATEGY_JUDGE",
-  "FINAL_AGGREGATOR",
-];
+const wizardSteps = ["Trace", "Design", "Meta Agent", "Run", "Verdict"];
+const STEP = { trace: 0, design: 1, judges: 2, run: 3, verdict: 4 };
 const sample: Step[] = [
   {
     id: 12,
@@ -98,13 +113,14 @@ const initial: Config = {
   objective:
     "Find unsupported claims and attribute failures to agent decisions.",
   taxonomy: exampleTaxonomy,
-  schema:
-    '{"type":"object","properties":{"verdict":{"type":"string"},"evidence":{"type":"array"}}}',
+  schema: exampleOutputSchema,
   examples: "[]",
   model: "",
   mode: "Full trace",
-  nodes: roles,
-  edges: roles.slice(0, -1).map((n) => [n, "FINAL_AGGREGATOR"]),
+  nodes: [],
+  edges: [],
+  judge_instructions: {},
+  judges: [],
 };
 function read<T>(key: string, fallback: T): T {
   try {
@@ -197,6 +213,11 @@ export default function Workspace() {
     ...read("aj-config", initial),
     model: "",
   }));
+  const [designState, setDesignState] = useState<DesignState>("not_generated");
+  const [designAccepted, setDesignAccepted] = useState(false);
+  const [designError, setDesignError] = useState("");
+  const [designMeta, setDesignMeta] = useState<DesignMetadata | null>(null);
+  const [designSnapshot, setDesignSnapshot] = useState<string | null>(null);
   const [steps, setSteps] = useState<Step[]>(sample);
   const [raw, setRaw] = useState(JSON.stringify(sample, null, 2));
   const [traceIssue, setTraceIssue] = useState("");
@@ -291,6 +312,14 @@ export default function Workspace() {
     }
   }, [config.nodes, config.edges]);
   useEffect(() => {
+    if (designSnapshot === null) return;
+    const current = designKey(config, steps);
+    setDesignState((state) => nextDesignState(state, current, designSnapshot));
+  }, [config.objective, config.taxonomy, config.schema, config.examples, steps, designSnapshot]);
+  useEffect(() => {
+    if (designState === "stale") setDesignAccepted(false);
+  }, [designState]);
+  useEffect(() => {
     let mounted = true;
     Promise.all([
       api<Run[]>("/runs"),
@@ -304,20 +333,27 @@ export default function Workspace() {
         setRuns(rs);
         const selectedModel=env.fields.find((field)=>field.name==="AGENT_NODE_MODEL")?.value?.trim();
         if (ws.config) {
-          const usesFixedJudges =
-            ws.config.nodes.length === roles.length &&
-            roles.every((role) => ws.config!.nodes.includes(role));
+          const restored = ws.config;
+          const nodes = restored.nodes?.length ? restored.nodes : initial.nodes;
           setConfig({
-            ...ws.config,
-            taxonomy: ws.config.taxonomy?.trim() ? ws.config.taxonomy : exampleTaxonomy,
+            ...restored,
+            taxonomy: restored.taxonomy?.trim() ? restored.taxonomy : exampleTaxonomy,
+            schema: restored.schema?.trim() ? restored.schema : exampleOutputSchema,
             mode: "Full trace",
             model: selectedModel || "",
-            nodes: roles,
-            edges: usesFixedJudges ? ws.config.edges : initial.edges,
-            judge_instructions: Object.fromEntries(
-              roles.map((role) => [role, ws.config!.judge_instructions?.[role] ?? ""]),
-            ),
+            nodes,
+            edges: restored.nodes?.length ? restored.edges ?? [] : initial.edges,
+            judge_instructions: restored.judge_instructions ?? {},
+            judges: restored.judges ?? [],
+            design_source: restored.design_source ?? "manual",
+            design_id: restored.design_id,
           });
+          // A restored design is not re-verified here; the server checks its
+          // identity again, and the user must regenerate or accept it.
+          if (restored.design_source === "generated") {
+            setDesignState("stale");
+            setDesignAccepted(false);
+          }
         }
         else setConfig((current)=>({...current,model:selectedModel || ""}));
         setActive(rs.find((r) => r.status === "Running") ?? null);
@@ -350,7 +386,15 @@ export default function Workspace() {
         setDetail(r);
         setActive(null);
         setPhase(-1);
-        setWizard(3);
+        setWizard(STEP.verdict);
+        // The consumed Meta Agent output is cleared; the next evaluation needs a fresh one.
+        resetJudgePool();
+        // Taxonomy and output schema fall back to the example.md defaults for the next evaluation.
+        setConfig((c) => ({
+          ...c,
+          taxonomy: exampleTaxonomy,
+          schema: exampleOutputSchema,
+        }));
         source.close();
       }
     };
@@ -388,7 +432,7 @@ export default function Workspace() {
           setConfig((c) => ({
             ...c,
             taxonomy: exampleTaxonomy,
-            schema: JSON.stringify(exampleOutputSchema, null, 2),
+            schema: exampleOutputSchema,
           }));
           setError("");
           setNotice(
@@ -452,19 +496,17 @@ export default function Workspace() {
       />
     </label>
   );
-  function designValid() {
+  function designValid(requireModel = true) {
     try {
       const schema = parseDesignFile("schema", config.schema);
       const taxonomy = parseDesignFile("taxonomy", config.taxonomy);
       if (!Array.isArray(JSON.parse(config.examples)))
         throw Error("Examples must be an array.");
-      if (
-        !config.objective.trim() || !config.model.trim()
-      )
-        throw Error(
-          "Enter an objective, taxonomy, and model.",
-        );
-      if (!/^[\x21-\x7e]{1,200}$/.test(config.model.trim()))
+      if (!config.objective.trim())
+        throw Error("Enter an evaluation objective.");
+      if (requireModel && !config.model.trim())
+        throw Error("Set the judge model in Settings (AGENT_NODE_MODEL).");
+      if (config.model.trim() && !/^[\x21-\x7e]{1,200}$/.test(config.model.trim()))
         throw Error("Model ID must use printable ASCII without spaces.");
       setError("");
       if (schema !== config.schema || taxonomy !== config.taxonomy)
@@ -491,9 +533,93 @@ export default function Workspace() {
       setError(String(e));
     }
   }
-  async function launch() {
+  async function generateDesign() {
     if (!parseTrace(raw)) {
-      setWizard(0);
+      setWizard(STEP.trace);
+      return;
+    }
+    const normalized = designValid(false);
+    if (!normalized) return;
+    const parsedSteps = normalizeTrace(raw);
+    setDesignState("generating");
+    setDesignError("");
+    setDesignAccepted(false);
+    try {
+      const design = await api<Design>("/design/generate", "POST", {
+        objective: normalized.objective,
+        taxonomy: normalized.taxonomy,
+        schema: normalized.schema,
+        examples: normalized.examples,
+        steps: parsedSteps,
+      });
+      setConfig((c) => ({
+        ...c,
+        objective: normalized.objective,
+        taxonomy: normalized.taxonomy,
+        schema: normalized.schema,
+        examples: normalized.examples,
+        nodes: design.nodes,
+        edges: design.edges,
+        judge_instructions: design.judge_instructions,
+        judges: design.judges ?? [],
+        design_source: "generated",
+        design_id: design.design_id,
+      }));
+      setDesignMeta(design.metadata ?? null);
+      setDesignSnapshot(designKey(normalized, parsedSteps));
+      setDesignState("generated");
+      setNotice(
+        `Generated ${design.nodes.length} judges and ${design.edges.length} connections. Review and accept the pool.`,
+      );
+      if (design.metadata?.unused_judges?.length)
+        setNotice(
+          `Left out of the DAG: ${design.metadata.unused_judges.join(", ")}.`,
+        );
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setDesignState("failed");
+      setDesignError(message);
+      setError(message);
+    }
+  }
+  function acceptDesign() {
+    setDesignAccepted(true);
+    setNotice("Meta Agent accepted. This exact pool and DAG will be executed.");
+  }
+  function resetJudgePool() {
+    setConfig((c) => ({
+      ...c,
+      nodes: [],
+      edges: [],
+      judge_instructions: {},
+      judges: [],
+      design_source: undefined,
+      design_id: undefined,
+    }));
+    setDesignState("not_generated");
+    setDesignAccepted(false);
+    setDesignSnapshot(null);
+    setDesignMeta(null);
+    setDesignError("");
+  }
+  const generatedDesign = config.design_source === "generated";
+  // While a fresh pool waits for approval, accepting it is the primary action.
+  const awaitingAcceptance =
+    generatedDesign && designState === "generated" && !designAccepted;
+  const runBlockedReason = blockedReasonFor(
+    config.design_source,
+    designState,
+    designAccepted,
+  );
+  const runBlocked = runBlockedReason !== "";
+  async function launch() {
+    if (runBlocked) {
+      setError(runBlockedReason);
+      setWizard(STEP.judges);
+      return;
+    }
+    if (!parseTrace(raw)) {
+      setWizard(STEP.trace);
       return;
     }
     const issue = validate(config);
@@ -512,7 +638,7 @@ export default function Workspace() {
       setDetail(null);
       setActive(run);
       setPhase(0);
-      setWizard(2);
+      setWizard(STEP.run);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -528,32 +654,46 @@ export default function Workspace() {
     }
   }
   function cloneRun(r: Run) {
-    setConfig({
+    const cloned: Config = {
       name: r.config.name,
       objective: r.config.objective,
       taxonomy: r.config.taxonomy?.trim() ? r.config.taxonomy : exampleTaxonomy,
-      schema: structuredClone(r.config.schema),
+      schema: r.config.schema?.trim()
+        ? structuredClone(r.config.schema)
+        : exampleOutputSchema,
       examples: structuredClone(r.config.examples),
       model: config.model,
       mode: "Full trace",
-      nodes: structuredClone(roles),
-      edges: structuredClone(initial.edges),
+      nodes: structuredClone(r.config.nodes),
+      edges: structuredClone(r.config.edges),
       judge_instructions: structuredClone(r.config.judge_instructions ?? {}),
-    });
+      judges: structuredClone(r.config.judges ?? []),
+      design_source: r.config.design_source ?? "manual",
+      design_id: r.config.design_id,
+    };
+    setConfig(cloned);
     setSteps(r.steps);
     setRaw(JSON.stringify(r.steps, null, 2));
-    setWizard(0);
+    // The cloned design keeps its identity, so it only needs to be accepted again.
+    setDesignSnapshot(cloned.design_id ? designKey(cloned, r.steps) : null);
+    setDesignState(cloned.design_id ? "generated" : "not_generated");
+    setDesignAccepted(false);
+    setDesignMeta(null);
+    setDesignError("");
+    setWizard(STEP.trace);
     navigate("New evaluation");
   }
   function next() {
-    if (wizard === 0 && !parseTrace(raw)) return;
-    if (wizard === 1 && !designValid()) return;
-    if (wizard === 1 && validate(config)) {
+    if (wizard === STEP.trace && !parseTrace(raw)) return;
+    if (wizard === STEP.design && !designValid()) return;
+    if (wizard === STEP.judges && validate(config)) {
       setError(validate(config));
       return;
     }
-    setWizard(Math.min(3, wizard + 1));
+    setWizard(Math.min(STEP.verdict, wizard + 1));
   }
+  const designStateLabel = stateLabelFor(designState, designAccepted);
+  const designSourceHint = sourceHintFor(config.design_source);
   const filteredRuns = runs.filter(
     (r) =>
       (filter === "Archived"
@@ -731,7 +871,9 @@ export default function Workspace() {
         {r.final_output !== undefined && (
           <pre>{JSON.stringify(r.final_output, null, 2)}</pre>
         )}
-        <h3>Node outputs</h3>
+        <h3>
+          Node outputs <span className="tag">{r.config.design_source ?? "manual"}</span>
+        </h3>
         {r.config.nodes.map((n) => (
           <details key={n}>
             <summary>{n}</summary>
@@ -742,6 +884,12 @@ export default function Workspace() {
                 2,
               )}
             </pre>
+            {r.config.judge_instructions?.[n] && (
+              <details>
+                <summary>Executed instructions</summary>
+                <pre>{r.config.judge_instructions[n]}</pre>
+              </details>
+            )}
           </details>
         ))}
         <button onClick={() => saveFile("run-" + r.id + ".json", r)}>
@@ -810,7 +958,7 @@ export default function Workspace() {
             <button
               className="primary-button"
               onClick={() => {
-                setWizard(0);
+                setWizard(STEP.trace);
                 navigate("New evaluation");
               }}
             >
@@ -890,12 +1038,7 @@ export default function Workspace() {
           {page === "New evaluation" && (
             <>
               <div className="wizard-tabs">
-                {[
-                  "Trace",
-                  "Design",
-                  "Run",
-                  "Verdict",
-                ].map((s, i) => (
+                {wizardSteps.map((s, i) => (
                   <button
                     type="button"
                     key={s}
@@ -911,7 +1054,7 @@ export default function Workspace() {
                 ))}
               </div>
               <section className="panel evaluation-panel">
-                {wizard === 0 && (
+                {wizard === STEP.trace && (
                   <div className="evaluation-split">
                     <div className="evaluation-pane evaluation-pane--controls">
                       <div className="evaluation-pane-heading">
@@ -989,7 +1132,7 @@ export default function Workspace() {
                     </div>
                   </div>
                 )}
-                {wizard === 1 && (
+                {wizard === STEP.design && (
                   <div className="evaluation-split design-fields">
                     <div className="evaluation-pane evaluation-pane--controls">
                       <div className="evaluation-pane-heading">
@@ -1091,7 +1234,119 @@ export default function Workspace() {
                     </div>
                   </div>
                 )}
-                {wizard === 2 && (
+                {wizard === STEP.judges && (
+                  <section className="judge-pool judge-pool-step">
+                    <div className="judge-pool-head">
+                      <div>
+                        <span className="eyebrow">META AGENT</span>
+                        <h2>
+                          {config.nodes.length} judges ·{" "}
+                          {config.edges.length} connections
+                        </h2>
+                        <p className="hint">{designSourceHint}</p>
+                      </div>
+                      <div className="judge-pool-actions">
+                        <span className={`design-state design-state--${designState}`}>
+                          {designStateLabel}
+                        </span>
+                        <button
+                          className={awaitingAcceptance ? "" : "primary-button"}
+                          disabled={designState === "generating" || !connected}
+                          onClick={() => void generateDesign()}
+                        >
+                          <Sparkles size={15} />
+                          {designState === "generating"
+                            ? "Generating…"
+                            : generatedDesign
+                              ? "Regenerate Meta Agent"
+                              : "Run Meta Agent"}
+                        </button>
+                        {awaitingAcceptance && (
+                          <button className="primary-button" onClick={acceptDesign}>
+                            <Check size={15} /> Use this pool
+                          </button>
+                        )}
+                        {config.nodes.length > 0 && (
+                          <button onClick={resetJudgePool}>
+                            <RotateCcw size={15} /> Reset Meta Agent
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {designState === "generating" && (
+                      <p className="hint" role="status">
+                        The meta-agent is designing the judges and how they
+                        connect for this trace.
+                      </p>
+                    )}
+                    {designState === "failed" && (
+                      <div className="finding" role="alert">
+                        <p>{designError}</p>
+                        <button onClick={() => void generateDesign()}>
+                          Retry generation
+                        </button>
+                      </div>
+                    )}
+                    {designState === "stale" && (
+                      <p className="hint" role="alert">
+                        {runBlockedReason} The evaluation stays blocked until the
+                        pool is regenerated.
+                      </p>
+                    )}
+                    {generatedDesign && designState === "generated" && (
+                      <p className="hint" role="status">
+                        {designAccepted
+                          ? "Accepted. This exact pool and DAG are what the run executes."
+                          : "Review the generated judges, then accept the pool to unlock the run."}
+                      </p>
+                    )}
+                    {designMeta && (
+                      <p className="hint">
+                        Meta Agent model: {designMeta.pool_model || "n/a"}
+                        {designMeta.unused_judges?.length
+                          ? ` · Left out of the pipeline: ${designMeta.unused_judges.join(", ")}`
+                          : ""}
+                      </p>
+                    )}
+                    {config.nodes.length > 0 ? (
+                      <>
+                        <div className="judge-cards">
+                          {config.nodes.map((name) => {
+                            const judge = config.judges?.find((j) => j.name === name);
+                            const instructions =
+                              config.judge_instructions?.[name] ?? judge?.instructions ?? "";
+                            return (
+                              <details key={name} className="judge-card">
+                                <summary>
+                                  <strong>{name}</strong>
+                                  <small>
+                                    {judge?.model || config.model || "model from settings"}
+                                  </small>
+                                </summary>
+                                {instructions ? (
+                                  <pre>{instructions}</pre>
+                                ) : (
+                                  <p className="hint">
+                                    No judge-specific instructions; the runner uses the
+                                    shared evaluation prompt for this node.
+                                  </p>
+                                )}
+                              </details>
+                            );
+                          })}
+                        </div>
+                        <PipelineGraph config={config} />
+                      </>
+                    ) : (
+                      designState !== "generating" && (
+                        <p className="hint" role="status">
+                          No judges yet. Run Meta Agent to continue.
+                        </p>
+                      )
+                    )}
+                  </section>
+                )}
+                {wizard === STEP.run && (
                   <div className="evaluation-split evaluation-run-layout">
                     <div className="evaluation-pane evaluation-pane--controls">
                       <div className="evaluation-pane-heading">
@@ -1146,10 +1401,18 @@ export default function Workspace() {
                         <button onClick={cancel}>Cancel run</button>
                         </div>
                       )}
+                      {!active && runBlocked && (
+                        <p className="hint" role="alert">
+                          {runBlockedReason}{" "}
+                          <button className="link" onClick={() => setWizard(STEP.judges)}>
+                            Open Meta Agent
+                          </button>
+                        </p>
+                      )}
                       {!active && (
                         <button
                           className="primary-button"
-                          disabled={launching || !connected}
+                          disabled={launching || !connected || runBlocked}
                           onClick={launch}
                         >
                           <Play size={16} />
@@ -1174,7 +1437,7 @@ export default function Workspace() {
                     </div>
                   </div>
                 )}
-                {wizard === 3 &&
+                {wizard === STEP.verdict &&
                   (detail ? (
                     <div className="evaluation-result">{resultView(detail)}</div>
                   ) : (
@@ -1184,12 +1447,12 @@ export default function Workspace() {
                   ))}
                 <div className="wizard-footer">
                   <button
-                    disabled={wizard === 0 || !!active}
+                    disabled={wizard === STEP.trace || !!active}
                     onClick={() => setWizard(wizard - 1)}
                   >
                     Back
                   </button>
-                  {wizard < 2 && (
+                  {wizard < STEP.run && (
                     <button className="primary-button" onClick={next}>
                       Continue <ArrowRight size={15} />
                     </button>

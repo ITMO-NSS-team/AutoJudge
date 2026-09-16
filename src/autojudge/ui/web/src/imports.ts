@@ -54,6 +54,62 @@ export function parseDesignFile(kind: 'schema' | 'taxonomy', input: string): str
   return text;
 }
 
+export type ImportedDesign = {
+  nodes: string[];
+  edges: string[][];
+  judge_instructions: Record<string, string>;
+  judges?: { name: string; instructions: string; model?: string; mcp_tools?: string[] }[];
+};
+
+// Accepts a design exported from this workspace or written by hand, so an
+// existing pipeline can run without calling the judge generator.
+export function parseDesignConfig(input: string): ImportedDesign {
+  const text = input.replace(/^﻿/, '').trim();
+  if (!text) throw Error('The file is empty.');
+  let data: unknown;
+  try { data = JSON.parse(extractFencedJson(text)); } catch { throw Error('A design file must contain JSON.'); }
+  const source = (data && typeof data === 'object' && !Array.isArray(data) ? data : {}) as Record<string, unknown>;
+  const design = (source.config && typeof source.config === 'object' ? source.config : source) as Record<string, unknown>;
+  const nodes = design.nodes;
+  if (!Array.isArray(nodes) || !nodes.length || nodes.some((n) => typeof n !== 'string' || !n.trim()))
+    throw Error('A design must list non-empty judge names in "nodes".');
+  if (new Set(nodes as string[]).size !== nodes.length) throw Error('Judge names must be unique.');
+  if (!(nodes as string[]).includes('FINAL_AGGREGATOR')) throw Error('A design must include FINAL_AGGREGATOR.');
+  const rawEdges = design.edges ?? [];
+  if (!Array.isArray(rawEdges)) throw Error('"edges" must be an array of [from, to] pairs.');
+  const edges = rawEdges.map((edge) => {
+    if (!Array.isArray(edge) || edge.length !== 2 || edge.some((n) => typeof n !== 'string'))
+      throw Error('Every edge must be a [from, to] pair of judge names.');
+    const [from, to] = edge as string[];
+    if (!(nodes as string[]).includes(from) || !(nodes as string[]).includes(to))
+      throw Error(`Edge ${from} → ${to} references a judge that is not in "nodes".`);
+    if (from === 'FINAL_AGGREGATOR') throw Error('FINAL_AGGREGATOR must be the terminal judge.');
+    return [from, to];
+  });
+  const rawInstructions = design.judge_instructions;
+  const instructions: Record<string, string> = {};
+  if (rawInstructions !== undefined) {
+    if (!rawInstructions || typeof rawInstructions !== 'object' || Array.isArray(rawInstructions))
+      throw Error('"judge_instructions" must map judge names to instructions.');
+    for (const [name, value] of Object.entries(rawInstructions as Record<string, unknown>)) {
+      if (typeof value !== 'string') throw Error(`Instructions for ${name} must be text.`);
+      if (!(nodes as string[]).includes(name)) throw Error(`Instructions reference unknown judge ${name}.`);
+      instructions[name] = value;
+    }
+  }
+  const judges = Array.isArray(design.judges)
+    ? (design.judges as Record<string, unknown>[])
+        .filter((judge) => judge && typeof judge.name === 'string' && (nodes as string[]).includes(judge.name as string))
+        .map((judge) => ({
+          name: String(judge.name),
+          instructions: typeof judge.instructions === 'string' ? judge.instructions : instructions[String(judge.name)] ?? '',
+          model: typeof judge.model === 'string' ? judge.model : undefined,
+          mcp_tools: Array.isArray(judge.mcp_tools) ? judge.mcp_tools.map(String) : undefined,
+        }))
+    : undefined;
+  return { nodes: nodes as string[], edges, judge_instructions: instructions, judges };
+}
+
 export function normalizeTrace(text: string) {
   const clean = text.replace(/^\uFEFF/, '').trim();
   let data;

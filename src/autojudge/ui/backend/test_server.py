@@ -15,6 +15,7 @@ class ApiTests(unittest.TestCase):
             'OPENROUTER_API_KEY': 'hosted-test-secret',
             'AGENT_NODE_MODEL': 'test/hosted-model',
             'AGENT_NODE_TEMPERATURE': '0.4',
+            'ENDPOINT_API_URL': 'https://example.test/v1',
             'AUTOJUDGE_AI_ENABLED': '0',
         }
         with tempfile.TemporaryDirectory() as directory, patch.object(
@@ -55,7 +56,7 @@ class ApiTests(unittest.TestCase):
                 self.assertEqual(client.post('/api/runs', json=ai_request).status_code, 503)
             self.assertEqual(
                 server.ai_settings(),
-                ('hosted-test-secret', 0.4, 'test/hosted-model', 'https://openrouter.ai/api/v1'),
+                ('hosted-test-secret', 0.4, 'test/hosted-model', 'https://example.test/v1'),
             )
 
     def test_master_key_storage_encrypts_at_rest(self):
@@ -109,27 +110,38 @@ class ApiTests(unittest.TestCase):
 
     def test_env_settings(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(server, 'DB_PATH', Path(directory)/'test.sqlite'), patch.object(server, 'ENV_PATH', Path(directory)/'.env'), patch.dict('os.environ', {}, clear=True):
+            server.put('env','LLM_BASE_URL',{'value':'https://legacy.example.test/v1'})
             with TestClient(server.app) as client:
                 headers={'Origin':'http://127.0.0.1:5173'}
                 path='/api/settings/env'
                 fields=client.get(path).json()['fields']
-                self.assertEqual(len(fields),15)
+                self.assertEqual(len(fields),5)
+                # The Meta Agent that generates the judge pool is configured
+                # separately from the judge execution model.
+                self.assertEqual({'AGENT_NODE_MODEL','META_AGENT_MODEL'}
+                                 -{field['name'] for field in fields},set())
                 self.assertNotIn('MCP models',{field['group'] for field in fields})
-                values={'HF_TOKEN':'fake-token-for-offline-test','DB_PORT':'5433','AGENT_NODE_TEMPERATURE':'0.7'}
+                self.assertNotIn('HF_TOKEN',{field['name'] for field in fields})
+                self.assertNotIn('GITHUB_TOKEN',{field['name'] for field in fields})
+                self.assertNotIn('E2B_API_KEY',{field['name'] for field in fields})
+                self.assertEqual(next(f for f in fields if f['name']=='ENDPOINT_API_URL')['value'],'https://legacy.example.test/v1')
+                secret='fake-token-for-offline-test'
+                values={'OPENROUTER_API_KEY':secret,'AGENT_NODE_TEMPERATURE':'0.7','ENDPOINT_API_URL':'https://example.test/v1'}
                 response=client.put(path,json={'values':values},headers=headers)
                 self.assertEqual(response.status_code,200)
-                self.assertNotIn(values['HF_TOKEN'],response.text)
-                self.assertNotIn(values['HF_TOKEN'].encode(),server.DB_PATH.read_bytes())
-                self.assertNotIn('HF_TOKEN', client.get('/api/workspace').text)
-                self.assertEqual(client.put(path,json={'values':{'DB_PORT':'99999'}},headers=headers).status_code,422)
+                self.assertNotIn(secret,response.text)
+                self.assertNotIn(secret.encode(),server.DB_PATH.read_bytes())
+                self.assertNotIn('OPENROUTER_API_KEY', client.get('/api/workspace').text)
+                self.assertEqual(client.put(path,json={'values':{'AGENT_NODE_TEMPERATURE':'3'}},headers=headers).status_code,422)
                 self.assertEqual(client.put(path,json={'values':{'UNKNOWN':'x'}},headers=headers).status_code,422)
                 self.assertEqual(client.put(path,json={'values':values}).status_code,403)
-                client.put(path,json={'reset':['DB_PORT']},headers=headers)
+                client.put(path,json={'reset':['AGENT_NODE_TEMPERATURE']},headers=headers)
                 current={f['name']:f for f in client.get(path).json()['fields']}
-                self.assertEqual(current['DB_PORT']['value'],'5432')
-                self.assertTrue(current['HF_TOKEN']['configured'])
-                client.put(path,json={'values':{'HF_TOKEN':''}},headers=headers)
-                self.assertFalse(next(f for f in client.get(path).json()['fields'] if f['name']=='HF_TOKEN')['configured'])
+                self.assertEqual(current['AGENT_NODE_TEMPERATURE']['value'],'0')
+                self.assertEqual(current['ENDPOINT_API_URL']['value'],'https://example.test/v1')
+                self.assertTrue(current['OPENROUTER_API_KEY']['configured'])
+                client.put(path,json={'values':{'OPENROUTER_API_KEY':''}},headers=headers)
+                self.assertFalse(next(f for f in client.get(path).json()['fields'] if f['name']=='OPENROUTER_API_KEY')['configured'])
 
     def test_credentials(self):
         secret = 'test-only-not-a-real-provider-key-12345'
@@ -163,8 +175,8 @@ class ApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, patch.object(server, 'DB_PATH', Path(directory)/'test.sqlite'), patch.object(server, 'ENV_PATH', Path(directory)/'.env'), patch.dict('os.environ', {'AUTOJUDGE_ALLOWED_ORIGINS':allowed}, clear=True):
             with TestClient(server.app) as client:
                 path='/api/settings/env'
-                self.assertEqual(client.put(path,json={'values':{'DB_PORT':'5433'}},headers={'Origin':allowed}).status_code,200)
-                self.assertEqual(client.put(path,json={'values':{'DB_PORT':'5434'}},headers={'Origin':'https://other.example.test'}).status_code,403)
+                self.assertEqual(client.put(path,json={'values':{'AGENT_NODE_TEMPERATURE':'0.5'}},headers={'Origin':allowed}).status_code,200)
+                self.assertEqual(client.put(path,json={'values':{'AGENT_NODE_TEMPERATURE':'0.6'}},headers={'Origin':'https://other.example.test'}).status_code,403)
 
     def test_lifecycle(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(server, 'DB_PATH', Path(directory)/'test.sqlite'):

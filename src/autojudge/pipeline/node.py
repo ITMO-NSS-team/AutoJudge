@@ -15,7 +15,7 @@ from autojudge.pipeline.types import UsageTrackingMixin
 load_dotenv(".env")
 
 
-AGENT_NODE_TEMPERATURE = float(os.getenv("AGENT_NODE_TEMPERATURE", "0.1"))
+AGENT_NODE_TEMPERATURE = float(os.getenv("AGENT_NODE_TEMPERATURE", "0"))
 print('Judge temperature = ', AGENT_NODE_TEMPERATURE)
 
 @dataclass
@@ -55,14 +55,16 @@ class AgentNode(UsageTrackingMixin):
             from autojudge.db.db_tools import get_content_tool
             tools = [get_content_tool]
 
-        return Agent(
+        agent = Agent(
             name=self.name,
             model=model,
             tools=tools,
             instructions=self.instructions,
             retries=3,
-            instrument=True,
         )
+        # pydantic-ai 2.x accepts instrumentation as an attribute, not a kwarg.
+        agent.instrument = True
+        return agent
 
     def add_child(self, child: "AgentNode") -> None:
         """Adds a dependent child (child depends on self)."""

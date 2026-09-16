@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 import credentials
+import design_generator
 import env_settings
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -223,7 +224,7 @@ class RunRequest(BaseModel):
 def ai_settings():
     if settings_read_only():
         model = os.environ.get('AGENT_NODE_MODEL', 'google/gemini-2.5-flash')
-        temp = os.environ.get('AGENT_NODE_TEMPERATURE', '0.1')
+        temp = os.environ.get('AGENT_NODE_TEMPERATURE', '0')
         base_url = os.environ.get(
             'ENDPOINT_API_URL',
             os.environ.get('LLM_BASE_URL', 'https://openrouter.ai/api/v1'),
@@ -253,8 +254,8 @@ def validate_ai(request):
     config=request.config
     if config.get('mode')!='Full trace':
         raise HTTPException(422,'AI execution currently requires Full trace')
-    if len(config['nodes'])>8:
-        raise HTTPException(422,'AI runner supports at most 8 nodes')
+    if len(config['nodes'])>design_generator.MAX_NODES:
+        raise HTTPException(422,f'AI runner supports at most {design_generator.MAX_NODES} nodes')
     if not config.get('objective','').strip():
         raise HTTPException(422,'Objective is required')
     if not isinstance(config.get('taxonomy'),str) or not config['taxonomy'].strip():
@@ -278,9 +279,13 @@ def validate_ai(request):
         raise HTTPException(422,'Model ID must contain printable ASCII characters without spaces')
 
 
+def redact_text(text, secret):
+    return text.replace(secret,'[REDACTED]') if secret else text
+
+
 async def execute_ai(key, secret, temperature, base_url='https://openrouter.ai/api/v1'):
     def redact(value):
-        if isinstance(value,str): return value.replace(secret,'[REDACTED]') if secret else value
+        if isinstance(value,str): return redact_text(value,secret)
         if isinstance(value,dict): return {k:redact(v) for k,v in value.items()}
         if isinstance(value,list): return [redact(v) for v in value]
         return value
@@ -413,6 +418,75 @@ def design_validate(config: dict):
     return {'valid':True,'taxonomy_chars':len(taxonomy.strip()),'properties':schema_props,'examples':len(examples)}
 
 
+def design_inputs(body):
+    """Shared reading of the design inputs used for generation and identity checks."""
+    return (str(body.get('objective','')), str(body.get('taxonomy','')),
+            str(body.get('schema','')), str(body.get('examples','[]') or '[]'))
+
+
+@app.post('/api/design/generate')
+async def design_generate(request: Request):
+    """Generate the judge pool and DAG with the core AutoJudge meta-agents."""
+    if not ai_enabled():
+        raise HTTPException(503,'AI execution is disabled by the deployment owner')
+    check_credential_origin(request)
+    if request.headers.get('content-type','').split(';')[0] != 'application/json':
+        raise HTTPException(415,'JSON required')
+    raw=await request.body()
+    if len(raw)>4_000_000:
+        raise HTTPException(413,'Trace is too large for judge generation')
+    try:
+        body=json.loads(raw)
+        if not isinstance(body,dict): raise ValueError()
+        steps=body.get('steps')
+        if not isinstance(steps,list) or not 1<=len(steps)<=10000: raise ValueError()
+        if any(not isinstance(step,dict) for step in steps): raise ValueError()
+    except (ValueError,TypeError):
+        raise HTTPException(422,'Provide objective, taxonomy, schema and a trace of 1–10000 steps')
+    ids=[step.get('id') for step in steps]
+    if any(not isinstance(i,int) for i in ids) or len(set(ids))!=len(ids):
+        raise HTTPException(422,'Step IDs must be unique integers')
+    objective,taxonomy,schema,examples=design_inputs(body)
+    if design_generator.busy():
+        raise HTTPException(409,'Another judge pool generation is already running')
+    try: secret,_temperature,_model,_base_url=ai_settings()
+    except Exception:
+        raise HTTPException(503,'Cannot read AI settings; check credential storage and temperature')
+    if not secret:
+        raise HTTPException(422,'Set OPENROUTER_API_KEY in Settings')
+    fields={f['name']:f['value'] for f in get_env_settings()['fields']}
+    try:
+        return await design_generator.generate_design(
+            objective=objective,taxonomy=taxonomy,schema=schema,
+            examples=examples,steps=steps,api_key=secret,
+            pool_model=fields.get('META_AGENT_MODEL'))
+    except design_generator.DesignGenerationError as error:
+        raise HTTPException(error.status,redact_text(str(error),secret))
+    except asyncio.TimeoutError:
+        raise HTTPException(504,'Judge generation timed out before the pipeline was returned')
+    except Exception as error:
+        raise HTTPException(502,redact_text(
+            f'Judge generation failed ({type(error).__name__}): {error}',secret)[:500])
+
+
+def verify_design_identity(config, steps):
+    """A generated design may only run exactly as it was shown and accepted."""
+    expected=config.get('design_id')
+    if config.get('design_source')!='generated' and not expected:
+        return
+    if not isinstance(expected,str) or not expected:
+        raise HTTPException(422,'A generated design must carry design_id; '
+                                'regenerate the judge pool')
+    objective,taxonomy,schema,examples=design_inputs(config)
+    actual=design_generator.design_fingerprint(
+        objective=objective,taxonomy=taxonomy,schema=schema,examples=examples,steps=steps,
+        nodes=config.get('nodes',[]),edges=config.get('edges',[]),
+        judge_instructions=config.get('judge_instructions') or {})
+    if actual!=expected:
+        raise HTTPException(409,'The design no longer matches the judges and inputs it was '
+                                'generated from; regenerate the judge pool before running')
+
+
 async def execute(key, levels):
     try:
         for index, level in enumerate(levels):
@@ -454,6 +528,7 @@ async def create_run(request: RunRequest, http_request: Request):
     ids=[s.get('id') for s in request.steps]
     if any(not isinstance(i,int) for i in ids) or len(set(ids))!=len(ids):
         raise HTTPException(422,'Step IDs must be unique integers')
+    verify_design_identity(request.config,request.steps)
     secret=''
     temperature=0.1
     if request.execution=='ai':

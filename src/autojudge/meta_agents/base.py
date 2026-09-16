@@ -72,14 +72,16 @@ class BaseMetaAgent(UsageTrackingMixin, ABC):
         system_prompt = self._get_system_prompt()
         output_type = self._get_output_type()
 
-        return Agent(
+        agent = Agent(
             name=self.__class__.__name__,
             model=self._model,
             output_type=output_type,
             system_prompt=system_prompt,
             retries=self.retries,
-            instrument=True,
         )
+        # pydantic-ai 2.x accepts instrumentation as an attribute, not a kwarg.
+        agent.instrument = True
+        return agent
 
     @abstractmethod
     def _get_system_prompt(self) -> str:
@@ -94,5 +96,6 @@ class BaseMetaAgent(UsageTrackingMixin, ABC):
     async def _run_agent(self, prompt: str) -> Any:
         """Run agent with given prompt and return structured output."""
         result = await self.agent.run(prompt)
-        self._usage = result.usage()
+        # pydantic-ai 1.x exposes usage as a method, 2.x as a property.
+        self._usage = result.usage() if callable(result.usage) else result.usage
         return result.output
