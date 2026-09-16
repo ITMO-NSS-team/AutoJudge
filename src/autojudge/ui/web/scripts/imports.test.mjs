@@ -109,3 +109,17 @@ test('few-shot presets are valid JSON arrays of trace/output pairs', async () =>
     assert.ok(Buffer.byteLength(serialized) < 100000, 'preset must stay small');
   }
 });
+
+test('TRAIL design preset passes the same parsers as user input', async () => {
+  const { trailOutputSchema, trailTaxonomy } = await import('../src/trailDesign.ts');
+  const schema = JSON.parse(parseDesignFile('schema', JSON.stringify(trailOutputSchema)));
+  assert.equal(schema.type, 'object');
+  assert.deepEqual(schema.required, ['errors', 'scores']);
+  assert.equal(schema.properties.scores.items.properties.overall.maximum, 5);
+  const taxonomy = parseDesignFile('taxonomy', trailTaxonomy);
+  assert.match(taxonomy, /# TRAIL taxonomy/);
+  assert.match(taxonomy, /Resource Abuse/);
+  assert.equal(taxonomy, trailTaxonomy, 'Markdown taxonomy passes through unchanged');
+  const packaged = readFileSync(new URL('../public/test-data/trail-output-schema.json', import.meta.url), 'utf8');
+  assert.deepEqual(JSON.parse(packaged), trailOutputSchema, 'bundled JSON file matches the preset');
+});

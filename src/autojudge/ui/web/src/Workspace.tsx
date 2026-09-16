@@ -26,6 +26,7 @@ import EnvSettings from "./EnvSettings";
 import { api } from "./apiClient";
 import { exampleOutputSchema, exampleTaxonomy } from "./designTemplate";
 import { fewShotPresets } from "./fewShotPresets";
+import { trailOutputSchema, trailTaxonomy } from "./trailDesign";
 import { normalizeTrace, parseDesignFile } from "./imports";
 
 type Step = { id: number; agent: string; content: string };
@@ -397,6 +398,26 @@ export default function Workspace() {
         }}
       >
         Apply taxonomy and output schema from example.md
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          setPreviousDesign({
+            taxonomy: config.taxonomy,
+            schema: config.schema,
+          });
+          setConfig((c) => ({
+            ...c,
+            taxonomy: trailTaxonomy,
+            schema: JSON.stringify(trailOutputSchema, null, 2),
+          }));
+          setError("");
+          setNotice(
+            "The TRAIL taxonomy and output schema were applied; other fields were retained.",
+          );
+        }}
+      >
+        Apply taxonomy and output schema from TRAIL
       </button>
       {previousDesign && (
         <button
