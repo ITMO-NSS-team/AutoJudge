@@ -1,9 +1,14 @@
 """Adapter that turns UI inputs into a real AutoJudge judge pipeline.
 
 The UI never builds judges on its own: the pool comes from the core
-``PoolGenerator`` and the DAG comes from the core ``GraphGenerator``. This module
-only prepares the task description, validates what the meta-agents produced and
-converts it into the JSON contract the frontend consumes.
+``PoolGenerator``. The DAG is built deterministically in this module instead of
+calling the core ``GraphGenerator`` LLM: every judge feeds ``FINAL_AGGREGATOR``
+directly. ``GraphGenerator`` runs at ``temperature=0.3`` with no way to lower it
+per call, and produced inconsistent sequential/parallel topologies for the same
+pool across repeated calls, including chaining judges its own prompt describes
+as independent failure modes — see ``autojudge.meta_agents.graph_gen``'s
+``DEFAULT_GRAPH_INSTRUCT``. A fixed parallel star removes that non-determinism;
+this module still validates the result as a safety net.
 """
 from __future__ import annotations
 
@@ -22,9 +27,8 @@ if SOURCE not in sys.path:
 
 # Must stay equal to the AI runner node limit enforced in server.validate_ai.
 MAX_NODES = 8
-# A rejected pool or graph is regenerated with the validation failure as context.
+# A rejected pool is regenerated with the validation failure as context.
 POOL_ATTEMPTS = 2
-GRAPH_ATTEMPTS = 3
 AGGREGATOR = 'FINAL_AGGREGATOR'
 TRACE_EXCERPT_STEPS = 12
 TRACE_EXCERPT_CHARS = 700
@@ -108,7 +112,7 @@ def trace_profile(steps):
 
 
 def build_task_description(*, objective, taxonomy, schema, examples, steps, max_nodes=MAX_NODES):
-    """Task description handed to PoolGenerator and GraphGenerator."""
+    """Task description handed to PoolGenerator."""
     profile = trace_profile(steps)
     agents = ', '.join(profile['agents']) or 'not labelled in the trace'
     has_examples = bool(str(examples or '').strip() and str(examples).strip() not in ('[]', '{}'))
@@ -311,9 +315,9 @@ def _meta_failure(stage, error, *, stage_key=None):
 
 
 async def generate_design(*, objective, taxonomy, schema, examples, steps,
-                          api_key=None, pool_model=None, graph_model=None,
+                          api_key=None, pool_model=None,
                           max_nodes=MAX_NODES):
-    """Generate a judge pool and DAG with the core meta-agents.
+    """Generate a judge pool with the core PoolGenerator and a fixed parallel DAG.
 
     Returns the JSON contract consumed by the frontend; the same object is later
     submitted back to ``/api/runs`` and executed unchanged.
@@ -333,13 +337,13 @@ async def generate_design(*, objective, taxonomy, schema, examples, steps,
     async with _generation_lock:
         with _meta_environment(api_key):
             try:
-                from autojudge.meta_agents import GraphGenerator, PoolGenerator
+                from autojudge.meta_agents import PoolGenerator
+                from autojudge.meta_agents.graph_gen import get_parallel_graph
             except ImportError as error:
                 raise DesignGenerationError(
                     f'AutoJudge meta-agents are unavailable: {error}',
                     stage='pool', status=503) from None
             pool_model_id = (pool_model or '').strip() or meta_model('META_AGENT_MODEL')
-            graph_model_id = (graph_model or '').strip() or meta_model('GRAPH_GEN_MODEL')
             try:
                 pool_generator = PoolGenerator(
                     output_schema=schema, taxonomy=taxonomy, examples=examples,
@@ -365,39 +369,21 @@ async def generate_design(*, objective, taxonomy, schema, examples, steps,
                     failure, feedback = error, str(error)
             if judges is None:
                 raise failure
+            # The LLM GraphGenerator is not used from the UI: it runs at a fixed
+            # temperature of 0.3 and produced inconsistent sequential/parallel
+            # topologies for the same pool, sometimes chaining judges its own
+            # prompt classifies as independent. Every judge feeds FINAL_AGGREGATOR
+            # directly instead; validation stays as a safety net.
             try:
-                graph_generator = GraphGenerator(
-                    **({'model': graph_model_id} if graph_model_id else {}))
-            except Exception as error:
-                raise DesignGenerationError(
-                    f'DAG generation could not start: {error}', stage='graph', status=503
-                ) from None
-            # The graph prompt names optional judges such as GUILTY_AGENT_FINDER, so a
-            # model sometimes wires in a judge the pool does not contain. Validation
-            # catches it; the failure is handed back as the documented context.
-            nodes = edges = order = None
-            feedback = None
-            failure = None
-            names = ', '.join(judge['name'] for judge in judges)
-            for _ in range(GRAPH_ATTEMPTS):
-                try:
-                    graph = await graph_generator.create_graph(pool, task, context=feedback)
-                    nodes, edges = validate_graph(graph, judges, max_nodes=max_nodes)
-                    order = build_with_pipeline_builder(pool, graph)
-                    break
-                except (ValueError, DesignGenerationError) as error:
-                    failure = (error if isinstance(error, DesignGenerationError)
-                               else DesignGenerationError(
-                                   f'The generated graph is invalid: {error}',
-                                   stage='graph', status=502))
-                    feedback = (f'{error}\nReturn a corrected graph that connects only these '
-                                f'judges: {names}.')
-                except Exception as error:
-                    raise _meta_failure('DAG generation', error, stage_key='graph') from None
-            if order is None:
-                raise failure
+                graph = get_parallel_graph(pool)
+                nodes, edges = validate_graph(graph, judges, max_nodes=max_nodes)
+                order = build_with_pipeline_builder(pool, graph)
+            except (ValueError, DesignGenerationError) as error:
+                raise (error if isinstance(error, DesignGenerationError)
+                      else DesignGenerationError(
+                          f'The generated graph is invalid: {error}', stage='graph', status=502)
+                      ) from None
             pool_model = getattr(pool_generator, 'model', '')
-            graph_model = getattr(graph_generator, 'model', '')
     ordered = [name for name in order if name in nodes]
     ordered += [name for name in nodes if name not in ordered]
     selected = [judge for judge in judges if judge['name'] in nodes]
@@ -417,7 +403,6 @@ async def generate_design(*, objective, taxonomy, schema, examples, steps,
         'metadata': {
             'generated_at': datetime.now(timezone.utc).isoformat(),
             'pool_model': pool_model,
-            'graph_model': graph_model,
             'judge_count': len(ordered),
             'unused_judges': unused,
             'trace_steps': len(steps),

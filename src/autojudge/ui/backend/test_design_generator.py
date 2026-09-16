@@ -20,10 +20,6 @@ INPUTS = {'objective': 'Attribute the failure to an agent decision',
           'schema': '{"type":"object","required":["verdict"],'
                     '"properties":{"verdict":{"type":"string"}}}',
           'examples': '[]'}
-CHAIN = {'TOOL_SELECTION_JUDGE': ['EVIDENCE_JUDGE'],
-         'API_FAILURE_JUDGE': ['FINAL_AGGREGATOR'],
-         'EVIDENCE_JUDGE': ['FINAL_AGGREGATOR'],
-         'FINAL_AGGREGATOR': []}
 
 
 def pool_of(*judges):
@@ -43,15 +39,14 @@ def chain_pool():
     )
 
 
-def meta_patches(pool=None, graph=None, pool_error=None, graph_error=None, captured=None,
-                 pools=None, graphs=None):
-    """Replace the two core meta-agents; everything else stays real.
+def meta_patches(pool=None, pool_error=None, captured=None, pools=None):
+    """Replace the core PoolGenerator; everything else (including the DAG,
+    which is now built deterministically without any LLM) stays real.
 
-    ``pools``/``graphs`` give one response per attempt; an Exception in the list
-    is raised for that attempt.
+    ``pools`` gives one response per attempt; an Exception in the list is
+    raised for that attempt.
     """
     pool_queue = list(pools) if pools is not None else None
-    graph_queue = list(graphs) if graphs is not None else None
 
     def take(queue, fallback):
         if queue is None:
@@ -76,74 +71,50 @@ def meta_patches(pool=None, graph=None, pool_error=None, graph_error=None, captu
                 raise pool_error
             return take(pool_queue, pool)
 
-    class Graph:
-        model = 'test/graph-model'
-
-        def __init__(self, **kwargs):
-            pass
-
-        async def create_graph(self, agent_pool, task, context=None):
-            if captured is not None:
-                captured['graph_task'] = task
-                captured.setdefault('graph_contexts', []).append(context)
-            if graph_error:
-                raise graph_error
-            return take(graph_queue, graph)
-
-    return (patch('autojudge.meta_agents.PoolGenerator', Pool),
-            patch('autojudge.meta_agents.GraphGenerator', Graph))
+    return patch('autojudge.meta_agents.PoolGenerator', Pool)
 
 
 class AdapterTests(unittest.IsolatedAsyncioTestCase):
-    async def test_pool_and_graph_become_the_ui_contract(self):
+    async def test_pool_becomes_the_ui_contract_with_a_deterministic_parallel_dag(self):
         captured = {}
-        pool_patch, graph_patch = meta_patches(chain_pool(), CHAIN, captured=captured)
-        with pool_patch, graph_patch:
+        with meta_patches(chain_pool(), captured=captured):
             design = await design_generator.generate_design(
                 steps=STEPS, api_key='test-key', **INPUTS)
         self.assertEqual(design['design_source'], 'generated')
-        self.assertEqual(sorted(design['nodes']), sorted(CHAIN))
+        self.assertEqual(sorted(design['nodes']),
+                         ['API_FAILURE_JUDGE', 'EVIDENCE_JUDGE', 'FINAL_AGGREGATOR',
+                          'TOOL_SELECTION_JUDGE'])
         self.assertEqual(design['nodes'][-1], 'FINAL_AGGREGATOR')
-        self.assertLess(design['nodes'].index('TOOL_SELECTION_JUDGE'),
-                        design['nodes'].index('EVIDENCE_JUDGE'))
-        self.assertEqual(design['edges'], [
-            ['TOOL_SELECTION_JUDGE', 'EVIDENCE_JUDGE'],
+        # No LLM decides the DAG: every judge feeds FINAL_AGGREGATOR directly.
+        self.assertEqual(sorted(design['edges']), sorted([
+            ['TOOL_SELECTION_JUDGE', 'FINAL_AGGREGATOR'],
             ['API_FAILURE_JUDGE', 'FINAL_AGGREGATOR'],
             ['EVIDENCE_JUDGE', 'FINAL_AGGREGATOR'],
-        ])
+        ]))
         self.assertEqual(design['judge_instructions']['EVIDENCE_JUDGE'],
                          'Verify that each claim cites a real step.')
         self.assertEqual([judge['name'] for judge in design['judges']], design['nodes'])
         self.assertEqual(design['judges'][0]['model'], 'test/judge-model')
         self.assertEqual(design['judges'][0]['mcp_tools'], [])
         self.assertEqual(design['metadata']['pool_model'], 'test/pool-model')
-        self.assertEqual(design['metadata']['graph_model'], 'test/graph-model')
+        self.assertNotIn('graph_model', design['metadata'])
+        self.assertEqual(design['metadata']['unused_judges'], [])
         self.assertTrue(design['design_id'])
         json.dumps(design)
-        # The generators are told about the runner budget and the trace.
+        # The generator is told about the runner budget and the trace.
         self.assertIn('at most 7 specialised judges', captured['task'])
         self.assertIn('Researcher', captured['task'])
         self.assertEqual(captured['pool_kwargs']['taxonomy'], INPUTS['taxonomy'])
         self.assertEqual(captured['pool_kwargs']['output_schema'], INPUTS['schema'])
 
-    async def test_graph_topology_is_not_flattened_to_a_star(self):
-        pool_patch, graph_patch = meta_patches(chain_pool(), CHAIN)
-        with pool_patch, graph_patch:
-            design = await design_generator.generate_design(
-                steps=STEPS, api_key='test-key', **INPUTS)
-        self.assertIn(['TOOL_SELECTION_JUDGE', 'EVIDENCE_JUDGE'], design['edges'])
-        self.assertNotIn(['TOOL_SELECTION_JUDGE', 'FINAL_AGGREGATOR'], design['edges'])
-
-    async def test_judges_outside_the_graph_are_reported_not_hidden(self):
+    async def test_every_generated_judge_is_used_none_left_out(self):
         pool = pool_of(('A_JUDGE', 'a'), ('B_JUDGE', 'b'), ('FINAL_AGGREGATOR', 'final'))
-        graph = {'A_JUDGE': ['FINAL_AGGREGATOR'], 'FINAL_AGGREGATOR': []}
-        pool_patch, graph_patch = meta_patches(pool, graph)
-        with pool_patch, graph_patch:
+        with meta_patches(pool):
             design = await design_generator.generate_design(
                 steps=STEPS, api_key='test-key', **INPUTS)
-        self.assertEqual(design['nodes'], ['A_JUDGE', 'FINAL_AGGREGATOR'])
-        self.assertEqual(design['metadata']['unused_judges'], ['B_JUDGE'])
-        self.assertNotIn('B_JUDGE', design['judge_instructions'])
+        self.assertEqual(sorted(design['nodes']), ['A_JUDGE', 'B_JUDGE', 'FINAL_AGGREGATOR'])
+        self.assertEqual(design['metadata']['unused_judges'], [])
+        self.assertIn('B_JUDGE', design['judge_instructions'])
 
     def test_graph_dict_becomes_edge_pairs(self):
         self.assertEqual(
@@ -151,75 +122,54 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
                                           'FINAL_AGGREGATOR': []}),
             [['A', 'C'], ['B', 'C'], ['C', 'FINAL_AGGREGATOR']])
 
+    def test_get_parallel_graph_is_a_star_into_the_aggregator(self):
+        from autojudge.meta_agents.graph_gen import get_parallel_graph
+
+        graph = get_parallel_graph(chain_pool())
+        self.assertEqual(graph['FINAL_AGGREGATOR'], [])
+        for name in ('TOOL_SELECTION_JUDGE', 'API_FAILURE_JUDGE', 'EVIDENCE_JUDGE'):
+            self.assertEqual(graph[name], ['FINAL_AGGREGATOR'])
+
     def test_pipeline_builder_accepts_the_generated_design(self):
-        order = design_generator.build_with_pipeline_builder(chain_pool(), CHAIN)
+        graph = {'TOOL_SELECTION_JUDGE': ['FINAL_AGGREGATOR'],
+                 'API_FAILURE_JUDGE': ['FINAL_AGGREGATOR'],
+                 'EVIDENCE_JUDGE': ['FINAL_AGGREGATOR'], 'FINAL_AGGREGATOR': []}
+        order = design_generator.build_with_pipeline_builder(chain_pool(), graph)
         self.assertEqual(order[-1], 'FINAL_AGGREGATOR')
-        self.assertLess(order.index('TOOL_SELECTION_JUDGE'), order.index('EVIDENCE_JUDGE'))
+        self.assertEqual(len(order), 4)
 
 
 class RetryTests(unittest.IsolatedAsyncioTestCase):
-    """A rejected pool or graph is regenerated with the failure as context."""
+    """A rejected pool is regenerated with the failure as context.
 
-    async def test_graph_naming_an_unknown_judge_is_retried_with_feedback(self):
-        captured = {}
-        pool_patch, graph_patch = meta_patches(
-            chain_pool(),
-            graphs=[ValueError("Unknown agent 'GUILTY_AGENT_FINDER' in graph"), CHAIN],
-            captured=captured)
-        with pool_patch, graph_patch:
-            design = await design_generator.generate_design(
-                steps=STEPS, api_key='test-key', **INPUTS)
-        self.assertEqual(sorted(design['nodes']), sorted(CHAIN))
-        self.assertEqual(len(captured['graph_contexts']), 2)
-        self.assertIsNone(captured['graph_contexts'][0])
-        self.assertIn('GUILTY_AGENT_FINDER', captured['graph_contexts'][1])
-        self.assertIn('EVIDENCE_JUDGE', captured['graph_contexts'][1])
-
-    async def test_graph_rejected_by_our_own_validation_is_retried(self):
-        captured = {}
-        broken = {'TOOL_SELECTION_JUDGE': ['FINAL_AGGREGATOR'],
-                  'FINAL_AGGREGATOR': ['TOOL_SELECTION_JUDGE']}
-        pool_patch, graph_patch = meta_patches(
-            chain_pool(), graphs=[broken, CHAIN], captured=captured)
-        with pool_patch, graph_patch:
-            design = await design_generator.generate_design(
-                steps=STEPS, api_key='test-key', **INPUTS)
-        self.assertEqual(len(design['edges']), 3)
-        self.assertIn('terminal node', captured['graph_contexts'][1])
-
-    async def test_exhausted_graph_attempts_report_the_last_cause(self):
-        captured = {}
-        failure = ValueError("Unknown agent 'GHOST_JUDGE' in graph")
-        pool_patch, graph_patch = meta_patches(
-            chain_pool(), graphs=[failure] * design_generator.GRAPH_ATTEMPTS,
-            captured=captured)
-        with pool_patch, graph_patch:
-            with self.assertRaises(design_generator.DesignGenerationError) as error:
-                await design_generator.generate_design(
-                    steps=STEPS, api_key='test-key', **INPUTS)
-        self.assertIn('GHOST_JUDGE', str(error.exception))
-        self.assertEqual(len(captured['graph_contexts']), design_generator.GRAPH_ATTEMPTS)
-
-    async def test_provider_failure_is_not_retried(self):
-        captured = {}
-        pool_patch, graph_patch = meta_patches(
-            chain_pool(), graph_error=RuntimeError('provider refused'), captured=captured)
-        with pool_patch, graph_patch:
-            with self.assertRaises(design_generator.DesignGenerationError):
-                await design_generator.generate_design(
-                    steps=STEPS, api_key='test-key', **INPUTS)
-        self.assertEqual(len(captured['graph_contexts']), 1)
+    There is no equivalent retry for the DAG: it is no longer generated by an
+    LLM, so there is nothing to retry.
+    """
 
     async def test_pool_without_aggregator_is_regenerated(self):
         captured = {}
-        pool_patch, graph_patch = meta_patches(
-            pools=[pool_of(('A_JUDGE', 'a')), chain_pool()], graph=CHAIN, captured=captured)
-        with pool_patch, graph_patch:
+        with meta_patches(pools=[pool_of(('A_JUDGE', 'a')), chain_pool()], captured=captured):
             design = await design_generator.generate_design(
                 steps=STEPS, api_key='test-key', **INPUTS)
         self.assertIn('FINAL_AGGREGATOR', design['nodes'])
         self.assertEqual(len(captured['pool_contexts']), 2)
         self.assertIn('FINAL_AGGREGATOR', captured['pool_contexts'][1])
+
+    async def test_exhausted_pool_attempts_report_the_last_cause(self):
+        with meta_patches(pools=[pool_of(('A_JUDGE', 'a'))] * design_generator.POOL_ATTEMPTS):
+            with self.assertRaises(design_generator.DesignGenerationError) as error:
+                await design_generator.generate_design(
+                    steps=STEPS, api_key='test-key', **INPUTS)
+        self.assertIn('FINAL_AGGREGATOR', str(error.exception))
+
+    async def test_provider_failure_is_not_retried(self):
+        captured = {}
+        with meta_patches(pool_error=RuntimeError('provider refused'), captured=captured):
+            with self.assertRaises(design_generator.DesignGenerationError):
+                await design_generator.generate_design(
+                    steps=STEPS, api_key='test-key', **INPUTS)
+        # One attempt only, not POOL_ATTEMPTS: a provider failure is not retried.
+        self.assertEqual(len(captured['pool_contexts']), 1)
 
 
 class ValidationTests(unittest.TestCase):
@@ -334,16 +284,13 @@ class ApiTests(unittest.TestCase):
     def request(self, **overrides):
         return {**INPUTS, 'steps': STEPS, **overrides}
 
-    def run_with(self, body, pool=None, graph=None, pool_error=None, graph_error=None,
+    def run_with(self, body, pool=None, pool_error=None,
                  headers=HEADERS, settings=('test-secret', 0.1, 'test/model',
                                             'https://openrouter.ai/api/v1')):
-        pool_patch, graph_patch = meta_patches(
-            pool if pool is not None else chain_pool(),
-            graph if graph is not None else CHAIN,
-            pool_error=pool_error, graph_error=graph_error)
         with tempfile.TemporaryDirectory() as directory, patch.object(
             server, 'DB_PATH', Path(directory) / 'test.sqlite'
-        ), patch.object(server, 'ai_settings', return_value=settings), pool_patch, graph_patch:
+        ), patch.object(server, 'ai_settings', return_value=settings), meta_patches(
+            pool if pool is not None else chain_pool(), pool_error=pool_error):
             with self.client(directory) as client:
                 return client.post('/api/design/generate', json=body, headers=headers)
 
@@ -377,22 +324,10 @@ class ApiTests(unittest.TestCase):
         self.assertIn('provider refused the request', response.text)
         self.assertNotIn('test-secret', response.text)
 
-    def test_graph_generator_failure_reports_the_cause(self):
-        response = self.run_with(self.request(),
-                                 graph_error=ValueError('Unknown agent in graph'))
-        self.assertEqual(response.status_code, 502)
-        self.assertIn('Unknown agent in graph', response.text)
-
     def test_malformed_generated_pool_is_rejected_with_its_reason(self):
         response = self.run_with(self.request(), pool=pool_of(('A_JUDGE', 'a')))
         self.assertEqual(response.status_code, 422)
         self.assertIn('FINAL_AGGREGATOR', response.text)
-
-    def test_malformed_generated_graph_is_rejected_with_its_reason(self):
-        response = self.run_with(self.request(),
-                                 graph={'TOOL_SELECTION_JUDGE': ['GHOST'], 'FINAL_AGGREGATOR': []})
-        self.assertEqual(response.status_code, 422)
-        self.assertIn('GHOST', response.text)
 
     def test_disabled_ai_blocks_generation(self):
         with patch.dict('os.environ', {'AUTOJUDGE_AI_ENABLED': '0'}):
@@ -403,12 +338,11 @@ class ExecutedDesignTests(unittest.TestCase):
     """The accepted design is what runs; a tampered one is refused."""
 
     def generate_then_run(self, mutate=None):
-        pool_patch, graph_patch = meta_patches(chain_pool(), CHAIN)
         with tempfile.TemporaryDirectory() as directory, patch.object(
             server, 'DB_PATH', Path(directory) / 'test.sqlite'
         ), patch.object(server, 'ai_settings',
                         return_value=('test-secret', 0.1, 'test/model', 'u')), \
-                pool_patch, graph_patch:
+                meta_patches(chain_pool()):
             with TestClient(server.app) as client:
                 design = client.post('/api/design/generate',
                                      json={**INPUTS, 'steps': STEPS},
@@ -438,7 +372,8 @@ class ExecutedDesignTests(unittest.TestCase):
 
     def test_tampered_graph_is_refused(self):
         def tamper(config):
-            config['edges'] = [[node, 'FINAL_AGGREGATOR'] for node in config['nodes'][:-1]]
+            # Same edge set, different order: still a different fingerprint.
+            config['edges'] = list(reversed(config['edges']))
         self.assertEqual(self.generate_then_run(tamper).status_code, 409)
 
     def test_changed_taxonomy_is_refused(self):
