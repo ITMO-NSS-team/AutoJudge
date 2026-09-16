@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   Scale,
@@ -60,6 +60,7 @@ type Run = {
   verdict: string;
   archived?: boolean;
 };
+type Toast = { id: number; kind: "error" | "notice"; text: string };
 const sections = [
   "Overview",
   "New evaluation",
@@ -201,16 +202,30 @@ export default function Workspace() {
   const [traceIssue, setTraceIssue] = useState("");
   const [runs, setRuns] = useState<Run[]>(() => read("aj-runs", []));
   const [wizard, setWizard] = useState(0);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  useEffect(() => {
-    if (!error && !notice) return;
-    const timer = window.setTimeout(() => {
-      setError("");
-      setNotice("");
-    }, 6_000);
-    return () => window.clearTimeout(timer);
-  }, [error, notice]);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const toastId = useRef(0);
+  const pushToast = useCallback((kind: Toast["kind"], text: string) => {
+    const id = ++toastId.current;
+    setToasts((list) => [...list.slice(-4), { id, kind, text }]);
+    window.setTimeout(
+      () => setToasts((list) => list.filter((t) => t.id !== id)),
+      6_000,
+    );
+  }, []);
+  const closeToast = (id: number) =>
+    setToasts((list) => list.filter((t) => t.id !== id));
+  const setError = useCallback(
+    (text: string) => {
+      if (text) pushToast("error", text);
+    },
+    [pushToast],
+  );
+  const setNotice = useCallback(
+    (text: string) => {
+      if (text) pushToast("notice", text);
+    },
+    [pushToast],
+  );
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All");
   const [compare, setCompare] = useState<string[]>([]);
@@ -803,18 +818,16 @@ export default function Workspace() {
             </button>
           </div>
           <div className="toast-stack" aria-live="polite">
-            {error && (
-              <div role="alert" className="toast toast--error">
-                {error}
-                <button aria-label="Close error" onClick={() => setError("")}>×</button>
+            {toasts.map((toast) => (
+              <div
+                key={toast.id}
+                role={toast.kind === "error" ? "alert" : "status"}
+                className={`toast toast--${toast.kind}`}
+              >
+                {toast.text}
+                <button aria-label="Close notification" onClick={() => closeToast(toast.id)}>×</button>
               </div>
-            )}
-            {notice && (
-              <div role="status" className="toast toast--notice">
-                {notice}
-                <button aria-label="Close notification" onClick={() => setNotice("")}>×</button>
-              </div>
-            )}
+            ))}
           </div>
 
           {page === "Overview" && (
