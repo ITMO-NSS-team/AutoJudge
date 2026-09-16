@@ -1145,9 +1145,7 @@ export default function Workspace() {
                         Taxonomy accepts Markdown or JSON (an array of categories or section
                         object); the schema accepts JSON or Markdown with a fenced JSON block.
                         Test files: <a href="/test-data/output-schema.json" download>output schema</a>
-                        {" · "}<a href="/test-data/TAXONOMY.md" download>taxonomy</a>
-                        {" · "}<a href="/test-data/trail-output-schema.json" download>TRAIL output schema</a>
-                        {" · "}<a href="/test-data/trail-taxonomy.md" download>TRAIL taxonomy</a>.
+                        {" · "}<a href="/test-data/TAXONOMY.md" download>taxonomy</a>.
                       </p>
                       <div>
                         <Field
