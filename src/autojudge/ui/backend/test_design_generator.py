@@ -324,6 +324,14 @@ class ApiTests(unittest.TestCase):
         self.assertIn('provider refused the request', response.text)
         self.assertNotIn('test-secret', response.text)
 
+    def test_pool_generator_auth_failure_suggests_checking_the_key(self):
+        from pydantic_ai.exceptions import ModelHTTPError
+        error = ModelHTTPError(status_code=401, model_name='test/model',
+                               body={'message': 'Missing Authentication header'})
+        response = self.run_with(self.request(), pool_error=error)
+        self.assertEqual(response.status_code, 502)
+        self.assertIn('Проверить ключ', response.text)
+
     def test_malformed_generated_pool_is_rejected_with_its_reason(self):
         response = self.run_with(self.request(), pool=pool_of(('A_JUDGE', 'a')))
         self.assertEqual(response.status_code, 422)

@@ -301,14 +301,17 @@ def _meta_failure(stage, error, *, stage_key=None):
     name = type(error).__name__
     detail = str(error).strip().replace('\n', ' ')[:300]
     malformed = 'Validation' in name or 'UnexpectedModelBehavior' in name or 'JSONDecode' in name
+    status_code = getattr(error, 'status_code', None)
+    auth_failure = status_code in (401, 403) or 'Missing Authentication' in detail
+    hint = ' Проверить ключ.' if auth_failure else ''
     if malformed:
         return DesignGenerationError(
-            f'{stage} returned output that does not match the expected structure: {detail}',
+            f'{stage} returned output that does not match the expected structure: {detail}{hint}',
             stage=stage_key or stage.lower(),
             status=502,
         )
     return DesignGenerationError(
-        f'{stage} request failed ({name}): {detail}',
+        f'{stage} request failed ({name}): {detail}{hint}',
         stage=stage_key or stage.lower(),
         status=502,
     )
