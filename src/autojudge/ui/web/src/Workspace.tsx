@@ -25,6 +25,7 @@ import PipelineGraph from "./PipelineGraph";
 import EnvSettings from "./EnvSettings";
 import { api } from "./apiClient";
 import { exampleOutputSchema, exampleTaxonomy } from "./designTemplate";
+import { fewShotPresets } from "./fewShotPresets";
 import { normalizeTrace, parseDesignFile } from "./imports";
 
 type Step = { id: number; agent: string; content: string };
@@ -1023,6 +1024,41 @@ export default function Workspace() {
                         />
                         <details className="optional-field">
                           <summary>Optional few-shot examples</summary>
+                          <div className="toolbar">
+                            {fewShotPresets.map((preset) => (
+                              <button
+                                key={preset.id}
+                                type="button"
+                                title={preset.description}
+                                onClick={() => {
+                                  setConfig((c) => ({
+                                    ...c,
+                                    examples: JSON.stringify(preset.examples, null, 2),
+                                  }));
+                                  setError("");
+                                  setNotice(`Few-shot preset "${preset.name}" applied (${preset.examples.length} examples).`);
+                                }}
+                              >
+                                {preset.name}
+                              </button>
+                            ))}
+                            {config.examples !== "[]" && config.examples.trim() !== "" && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setConfig((c) => ({ ...c, examples: "[]" }));
+                                  setNotice("Few-shot examples cleared.");
+                                }}
+                              >
+                                Clear examples
+                              </button>
+                            )}
+                          </div>
+                          <p className="hint">
+                            Presets fill the JSON array below; each example pairs a trace
+                            excerpt with the expected judge output. Edit the array freely
+                            after applying a preset.
+                          </p>
                           <Field
                             label="Examples (JSON array)"
                             area

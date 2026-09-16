@@ -64,3 +64,24 @@ test('bundled traces fit AI input limit and do not include ground truth', () => 
     assert.doesNotMatch(raw, /"gold_answer"|"mistake_reason"|"mistake_step"/);
   }
 });
+
+test('few-shot presets are valid JSON arrays of trace/output pairs', async () => {
+  const { fewShotPresets } = await import('../src/fewShotPresets.ts');
+  assert.ok(fewShotPresets.length >= 1);
+  for (const preset of fewShotPresets) {
+    assert.ok(preset.id && preset.name && preset.description);
+    assert.ok(Array.isArray(preset.examples) && preset.examples.length >= 1);
+    for (const example of preset.examples) {
+      assert.ok(Array.isArray(example.trace) && example.trace.length >= 1);
+      assert.equal(typeof example.output, 'object');
+      assert.ok(example.output !== null && !Array.isArray(example.output));
+      for (const step of example.trace) {
+        assert.equal(typeof step.id, 'number');
+        assert.equal(typeof step.agent, 'string');
+        assert.equal(typeof step.content, 'string');
+      }
+    }
+    const serialized = JSON.stringify(preset.examples);
+    assert.ok(Buffer.byteLength(serialized) < 100000, 'preset must stay small');
+  }
+});
