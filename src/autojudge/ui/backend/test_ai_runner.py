@@ -24,6 +24,13 @@ def answer(messages, info):
     return ModelResponse(parts=[TextPart('{"verdict":"test judgment"}')])
 
 
+def fenced_answer(messages, info):
+    return ModelResponse(parts=[TextPart(
+        '``json\n{\n  "verdict": "poor",\n  "evidence": '
+        '[{"agent":"Manager","step":"2","reason":"Hardcoded input"}]\n}\n``'
+    )])
+
+
 class RunnerTests(unittest.IsolatedAsyncioTestCase):
     async def test_openrouter_endpoint_and_key(self):
         import httpx
@@ -67,6 +74,32 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([n for n,o in events if o['status']=='Completed'],CONFIG['nodes'])
         self.assertNotIn('fake-key',json.dumps(result))
 
+    async def test_final_output_accepts_malformed_markdown_json_fence(self):
+        with models.override_allow_model_requests(False), patch(
+            'socket.socket.connect', side_effect=AssertionError('Network forbidden')
+        ):
+            result = await ai_runner.run(
+                CONFIG, STEPS, 'fake-key', 0.1, lambda n,o: None,
+                FunctionModel(fenced_answer),
+            )
+        self.assertEqual(result['final_output']['verdict'], 'poor')
+        self.assertEqual(result['final_output']['evidence'][0]['step'], '2')
+
+    async def test_free_form_schema_text_is_accepted_as_format_instruction(self):
+        free_form = CONFIG.copy()
+        free_form['schema'] = '**OUTPUT FORMAT:**\n{{"verdict": "..."}}\nExample output:\n{{"verdict":"poor"}}'
+        with models.override_allow_model_requests(False), patch('socket.socket.connect',side_effect=AssertionError('Network forbidden')):
+            result=await ai_runner.run(free_form,STEPS,'fake-key',0.1,lambda n,o: None,FunctionModel(answer))
+        self.assertEqual(result['final_output']['verdict'],'test judgment')
+
+    def test_json_output_accepts_standard_fence_and_rejects_prose(self):
+        self.assertEqual(
+            ai_runner.parse_json_output('```json\n{"verdict":"ok"}\n```'),
+            {'verdict': 'ok'},
+        )
+        with self.assertRaises(ValueError):
+            ai_runner.parse_json_output('Result: {"verdict":"ok"}')
+
     async def test_failure_is_sanitized(self):
         def fail(messages, info): raise RuntimeError('private-key-must-not-leak')
         events=[]
@@ -96,9 +129,12 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
 class IntegrationTests(unittest.TestCase):
     def test_api_real_pipeline_requires_allowed_origin(self):
         real_run=ai_runner.run
-        async def local_run(config,steps,key,temp,emit):
-            return await real_run(config,steps,key,temp,emit,FunctionModel(answer))
-        with tempfile.TemporaryDirectory() as directory, patch.object(server,'DB_PATH',Path(directory)/'test.sqlite'), patch.object(server,'ai_settings',return_value=('test-secret',0.1,'test/model')), patch.object(ai_runner,'run',side_effect=local_run), models.override_allow_model_requests(False):
+        async def local_run(config,steps,key,temp,emit,base_url=ai_runner.OPENROUTER_BASE_URL):
+            return await real_run(
+                config, steps, key, temp, emit,
+                model_override=FunctionModel(answer), base_url=base_url,
+            )
+        with tempfile.TemporaryDirectory() as directory, patch.object(server,'DB_PATH',Path(directory)/'test.sqlite'), patch.object(server,'ai_settings',return_value=('test-secret',0.1,'test/model',ai_runner.OPENROUTER_BASE_URL)), patch.object(ai_runner,'run',side_effect=local_run), models.override_allow_model_requests(False):
             with TestClient(server.app) as client:
                 data={'config':CONFIG,'steps':STEPS,'execution':'ai'}
                 headers={'Origin':'http://127.0.0.1:5173'}

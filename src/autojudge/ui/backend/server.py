@@ -83,8 +83,12 @@ app = FastAPI(title='AutoJudge local API', lifespan=lifespan)
 
 def stored_env():
     with connect() as db:
-        return {name:json.loads(data) for name,data in db.execute(
+        stored = {name:json.loads(data) for name,data in db.execute(
             'SELECT id,payload FROM records WHERE kind=?', ('env',))}
+    # Preserve endpoints saved before LLM_BASE_URL was renamed.
+    if 'ENDPOINT_API_URL' not in stored and 'LLM_BASE_URL' in stored:
+        stored['ENDPOINT_API_URL'] = stored['LLM_BASE_URL']
+    return stored
 
 
 @app.get('/api/settings/env')
@@ -97,7 +101,7 @@ def get_env_settings():
             'secret_storage':storage,
             'read_only':settings_read_only(),
             'execution':'AI by default', 'applied_to_runner':True,
-            'runner_fields':['OPENROUTER_API_KEY','LLM_BASE_URL','AGENT_NODE_MODEL','AGENT_NODE_TEMPERATURE']}
+            'runner_fields':['OPENROUTER_API_KEY','ENDPOINT_API_URL','AGENT_NODE_MODEL','AGENT_NODE_TEMPERATURE']}
 
 
 @app.put('/api/settings/env')
@@ -131,12 +135,16 @@ async def save_env_settings(request: Request):
         for name in reset:
             credentials.remove(name,stored_env().get(name))
             db.execute('DELETE FROM records WHERE kind=? AND id=?',('env',name))
+            if name == 'ENDPOINT_API_URL':
+                db.execute('DELETE FROM records WHERE kind=? AND id=?',('env','LLM_BASE_URL'))
             if name=='OPENROUTER_API_KEY':
                 db.execute('DELETE FROM records WHERE kind=? AND id=?',('credentials','openrouter'))
         for name,value in updates.items():
             if value.get('disabled'):
                 credentials.remove(name,stored_env().get(name))
             db.execute('INSERT OR REPLACE INTO records VALUES (?,?,?)',('env',name,json.dumps(value)))
+            if name == 'ENDPOINT_API_URL':
+                db.execute('DELETE FROM records WHERE kind=? AND id=?',('env','LLM_BASE_URL'))
     return get_env_settings()
 
 
@@ -216,7 +224,11 @@ def ai_settings():
     if settings_read_only():
         model = os.environ.get('AGENT_NODE_MODEL', 'google/gemini-2.5-flash')
         temp = os.environ.get('AGENT_NODE_TEMPERATURE', '0.1')
-        base_url = os.environ.get('LLM_BASE_URL', 'https://openrouter.ai/api/v1')
+        base_url = os.environ.get(
+            'ENDPOINT_API_URL',
+            os.environ.get('LLM_BASE_URL', 'https://openrouter.ai/api/v1'),
+        )
+        env_settings.validate('ENDPOINT_API_URL', base_url)
         env_settings.validate('AGENT_NODE_MODEL', model)
         env_settings.validate('AGENT_NODE_TEMPERATURE', temp)
         key = os.environ.get('OPENROUTER_API_KEY', '')
@@ -233,7 +245,7 @@ def ai_settings():
     fields={f['name']:f['value'] for f in get_env_settings()['fields']}
     temp=fields['AGENT_NODE_TEMPERATURE']
     env_settings.validate('AGENT_NODE_TEMPERATURE',temp)
-    base_url=fields.get('LLM_BASE_URL') or 'https://openrouter.ai/api/v1'
+    base_url=fields.get('ENDPOINT_API_URL') or 'https://openrouter.ai/api/v1'
     return key,float(temp),fields['AGENT_NODE_MODEL'],base_url
 
 
@@ -247,14 +259,20 @@ def validate_ai(request):
         raise HTTPException(422,'Objective is required')
     if not isinstance(config.get('taxonomy'),str) or not config['taxonomy'].strip():
         raise HTTPException(422,'Taxonomy is required')
-    schema=json.loads(config['schema'])
-    def has_reference(obj):
-        if isinstance(obj,dict): return any(k in ('$ref','$dynamicRef','$recursiveRef') or has_reference(v) for k,v in obj.items())
-        return isinstance(obj,list) and any(has_reference(v) for v in obj)
-    if has_reference(schema): raise HTTPException(422,'Schema references are not supported by the first AI runner')
-    from jsonschema import Draft202012Validator
-    try: Draft202012Validator.check_schema(schema)
-    except Exception: raise HTTPException(422,'Invalid output JSON schema')
+    if not isinstance(config.get('schema'),str) or not config['schema'].strip():
+        raise HTTPException(422,'An output schema or format description is required')
+    try:
+        schema=json.loads(config['schema'])
+        if not isinstance(schema,dict) or schema.get('type')!='object':
+            raise ValueError
+        def has_reference(obj):
+            if isinstance(obj,dict): return any(k in ('$ref','$dynamicRef','$recursiveRef') or has_reference(v) for k,v in obj.items())
+            return isinstance(obj,list) and any(has_reference(v) for v in obj)
+        if has_reference(schema): raise HTTPException(422,'Schema references are not supported by the first AI runner')
+        from jsonschema import Draft202012Validator
+        Draft202012Validator.check_schema(schema)
+    except (ValueError,TypeError):
+        pass  # Free-form format instruction (e.g. a prompt template); validated as text only.
     model=config.get('model','').strip()
     if model and not env_settings.valid_model_id(model):
         raise HTTPException(422,'Model ID must contain printable ASCII characters without spaces')
@@ -330,7 +348,8 @@ def validate(config):
         assert isinstance(schema,dict) and schema.get('type')=='object'
         assert isinstance(json.loads(config.get('examples','[]')),list)
     except (ValueError,TypeError,AssertionError):
-        raise HTTPException(422,'Invalid schema or examples')
+        if not str(config.get('schema','')).strip():
+            raise HTTPException(422,'Invalid schema or examples')
     return levels
 
 
@@ -365,21 +384,33 @@ def design_validate(config: dict):
         raise HTTPException(422,'Taxonomy is required')
     if not env_settings.valid_model_id(config.get('model','')):
         raise HTTPException(422,'Model ID must contain printable ASCII characters without spaces')
+    if not isinstance(config.get('schema'),str) or not config['schema'].strip():
+        raise HTTPException(422,'An output schema or format description is required')
+    examples_ok=False
+    schema_props=0
+    try:
+        examples=json.loads(config.get('examples','[]'))
+        if not isinstance(examples,list): raise ValueError()
+        examples_ok=True
+    except Exception:
+        pass
     try:
         schema=json.loads(config.get('schema',''))
-        examples=json.loads(config.get('examples','[]'))
+        if not isinstance(schema,dict) or schema.get('type')!='object':
+            raise ValueError()
         from jsonschema import Draft202012Validator
         Draft202012Validator.check_schema(schema)
-        if not isinstance(schema,dict) or schema.get('type')!='object' or not isinstance(examples,list):
-            raise ValueError()
+        def has_reference(obj):
+            if isinstance(obj,dict): return any(k in ('$ref','$dynamicRef','$recursiveRef') or has_reference(v) for k,v in obj.items())
+            return isinstance(obj,list) and any(has_reference(v) for v in obj)
+        if has_reference(schema):
+            raise HTTPException(422,'Schema references are not supported by the runner')
+        schema_props=len(schema.get('properties',{}))
     except Exception:
-        raise HTTPException(422,'Use a valid object JSON Schema and a JSON array of examples')
-    def has_reference(obj):
-        if isinstance(obj,dict): return any(k in ('$ref','$dynamicRef','$recursiveRef') or has_reference(v) for k,v in obj.items())
-        return isinstance(obj,list) and any(has_reference(v) for v in obj)
-    if has_reference(schema):
-        raise HTTPException(422,'Schema references are not supported by the runner')
-    return {'valid':True,'taxonomy_chars':len(taxonomy.strip()),'properties':len(schema.get('properties',{})),'examples':len(examples)}
+        pass  # Free-form format instruction; accepted as text.
+    if not examples_ok:
+        raise HTTPException(422,'Use a JSON array of examples')
+    return {'valid':True,'taxonomy_chars':len(taxonomy.strip()),'properties':schema_props,'examples':len(examples)}
 
 
 async def execute(key, levels):

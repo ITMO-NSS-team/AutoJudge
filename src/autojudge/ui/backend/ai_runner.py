@@ -1,6 +1,7 @@
 """Real AutoJudge DAG adapter with bounded model requests and per-node events."""
 import asyncio
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -20,6 +21,30 @@ from httpx import AsyncClient
 from openai import AsyncOpenAI
 
 OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
+
+
+def parse_json_output(output):
+    """Parse plain JSON or JSON wrapped in two-or-more-backtick Markdown fences."""
+    if isinstance(output, (dict, list)):
+        return output
+    if not isinstance(output, str):
+        raise ValueError('Final judge output is not JSON')
+    text = output.strip().lstrip('\ufeff')
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    fenced = re.fullmatch(
+        r'`{2,}\s*(?:json)?\s*(.*?)\s*`{2,}',
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if fenced:
+        try:
+            return json.loads(fenced.group(1))
+        except json.JSONDecodeError:
+            pass
+    raise ValueError('Final judge output is not valid JSON') from None
 
 
 class LimitedAgent:
@@ -51,9 +76,7 @@ class ObservedPipeline(Pipeline):
         except asyncio.CancelledError:
             self.emit(node.name, {'status':'Cancelled', 'usage_unknown':True})
             raise
-        except Exception as exc:
-            import loguru
-            loguru.logger.exception('AI node failed: {}: {}', type(exc).__name__, str(exc)[:400])
+        except Exception:
             self.emit(node.name, {'status':'Failed', 'usage_unknown':True,
                       'error':'Model request failed; check provider access, model and limits.'})
             raise RuntimeError('Model request failed') from None
@@ -99,6 +122,13 @@ async def run(config, steps, key, temperature, emit, model_override=None, base_u
         built=builder.build()
         pipeline=ObservedPipeline(built.execution_order,emit)
         output=await asyncio.wait_for(pipeline.ainvoke(json.dumps(steps,ensure_ascii=False)),timeout=180)
-        verdict=json.loads(output)
-        Draft202012Validator(json.loads(config['schema'])).validate(verdict)
+        verdict=parse_json_output(output)
+        schema_text=config.get('schema','')
+        try:
+            schema=json.loads(schema_text)
+            strict = isinstance(schema,dict) and schema.get('type')=='object'
+        except Exception:
+            strict=False
+        if strict:
+            Draft202012Validator(schema).validate(verdict)
         return {'final_output':verdict,'trace':pipeline.trace.model_dump(mode='json')}

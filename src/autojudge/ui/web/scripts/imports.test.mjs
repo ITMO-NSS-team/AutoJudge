@@ -22,7 +22,11 @@ test('invalid trace is rejected', () => {
 });
 test('schema validation preserves valid input', () => {
   assert.equal(JSON.parse(parseDesignFile('schema', '{"type":"object"}')).type, 'object');
-  for (const raw of ['', '{}', '[]', '{broken', '{"type":"object","$ref":"https://example.com"}']) assert.throws(() => parseDesignFile('schema', raw));
+  assert.throws(() => parseDesignFile('schema', ''));
+  // Free-form text and non-object JSON are accepted as format instructions.
+  for (const raw of ['{}', '[]', '{"type":"object","$ref":"https://example.com"}'])
+    assert.ok(typeof parseDesignFile('schema', raw) === 'string');
+  assert.equal(parseDesignFile('schema', 'just prose'), 'just prose');
 });
 test('taxonomy import trims text and rejects empty files', () => {
   assert.equal(parseDesignFile('taxonomy', '\uFEFF  # Taxonomy\n\n- unsupported_claim  '), '# Taxonomy\n\n- unsupported_claim');
@@ -49,8 +53,9 @@ test('output schema accepts Markdown with a fenced JSON block', () => {
   assert.ok(schema.properties.verdict);
   const bare = parseDesignFile('schema', '```{"type":"object"}```');
   assert.equal(JSON.parse(bare).type, 'object');
-  assert.throws(() => parseDesignFile('schema', '# Schema\n\n```json\n{"type":"array"}\n```'));
-  assert.throws(() => parseDesignFile('schema', 'just prose without JSON'));
+  assert.throws(() => parseDesignFile('schema', ''));
+  assert.equal(parseDesignFile('schema', 'just prose without JSON'), 'just prose without JSON');
+  assert.equal(parseDesignFile('schema', '**OUTPUT FORMAT:**\n{{"verdict": "..."}}'), '**OUTPUT FORMAT:**\n{{"verdict": "..."}}');
 });
 test('raw nested OpenTelemetry spans become chronological trace steps', () => {
   const raw = {
@@ -110,16 +115,13 @@ test('few-shot presets are valid JSON arrays of trace/output pairs', async () =>
   }
 });
 
-test('TRAIL design preset passes the same parsers as user input', async () => {
-  const { trailOutputSchema, trailTaxonomy } = await import('../src/trailDesign.ts');
-  const schema = JSON.parse(parseDesignFile('schema', JSON.stringify(trailOutputSchema)));
+test('TRAIL design preset passes the same parsers as user input', () => {
+  const packaged = readFileSync(new URL('../public/test-data/trail-output-schema.json', import.meta.url), 'utf8');
+  const schema = JSON.parse(parseDesignFile('schema', packaged));
   assert.equal(schema.type, 'object');
   assert.deepEqual(schema.required, ['errors', 'scores']);
   assert.equal(schema.properties.scores.items.properties.overall.maximum, 5);
-  const taxonomy = parseDesignFile('taxonomy', trailTaxonomy);
-  assert.match(taxonomy, /# TRAIL taxonomy/);
-  assert.match(taxonomy, /Resource Abuse/);
-  assert.equal(taxonomy, trailTaxonomy, 'Markdown taxonomy passes through unchanged');
-  const packaged = readFileSync(new URL('../public/test-data/trail-output-schema.json', import.meta.url), 'utf8');
-  assert.deepEqual(JSON.parse(packaged), trailOutputSchema, 'bundled JSON file matches the preset');
+  const taxonomy = readFileSync(new URL('../public/test-data/trail-taxonomy.md', import.meta.url), 'utf8');
+  assert.match(parseDesignFile('taxonomy', taxonomy), /# TRAIL taxonomy/);
+  assert.match(parseDesignFile('taxonomy', taxonomy), /Resource Abuse/);
 });

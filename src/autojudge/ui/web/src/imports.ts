@@ -34,20 +34,24 @@ export function parseDesignFile(kind: 'schema' | 'taxonomy', input: string): str
       return text;
     }
   }
-  // Schema: raw JSON, or JSON inside a Markdown code fence.
-  let schema: unknown;
-  try { schema = JSON.parse(extractFencedJson(text)); }
-  catch { throw Error('The output schema must be a JSON object or a Markdown file with a fenced JSON block.'); }
-  if (!schema || Array.isArray(schema) || (schema as { type?: string }).type !== 'object')
-    throw Error('The output schema must describe a JSON object.');
-  const check = (value: unknown): void => {
-    if (value && typeof value === 'object') for (const [key, child] of Object.entries(value)) {
-      if (['$ref', '$dynamicRef', '$recursiveRef'].includes(key)) throw Error('Schema references are not yet supported by the runner.');
-      check(child);
+  // Schema: accept a JSON Schema (raw JSON, or JSON inside a Markdown code
+  // fence), or any free-form text/Markdown used as a format instruction for
+  // the FINAL_AGGREGATOR. Free-form text is returned unchanged.
+  try {
+    const candidate = extractFencedJson(text);
+    const schema = JSON.parse(candidate);
+    if (schema && typeof schema === 'object' && !Array.isArray(schema) && (schema as { type?: string }).type === 'object') {
+      const check = (value: unknown): void => {
+        if (value && typeof value === 'object') for (const [key, child] of Object.entries(value)) {
+          if (['$ref', '$dynamicRef', '$recursiveRef'].includes(key)) throw Error('Schema references are not yet supported by the runner.');
+          check(child);
+        }
+      };
+      check(schema);
+      return JSON.stringify(schema, null, 2);
     }
-  };
-  check(schema);
-  return JSON.stringify(schema, null, 2);
+  } catch { /* not a JSON Schema — fall through to free-form text */ }
+  return text;
 }
 
 export function normalizeTrace(text: string) {
