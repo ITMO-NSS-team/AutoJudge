@@ -425,11 +425,11 @@ export default function Workspace() {
   }
   const designUpload = (kind: "taxonomy" | "schema") => (
     <label className="file-input">
-      {kind === "taxonomy" ? "Upload taxonomy (.md, .txt)" : "Upload output schema (.json)"}
+      {kind === "taxonomy" ? "Upload taxonomy (.md, .txt, .json)" : "Upload output schema (.json, .md, .txt)"}
       <input
         aria-label={kind === "taxonomy" ? "Upload taxonomy" : "Upload output schema"}
         type="file"
-        accept={kind === "taxonomy" ? ".md,.txt,text/markdown,text/plain" : ".json,application/json"}
+        accept={kind === "taxonomy" ? ".md,.txt,.json,text/markdown,text/plain,application/json" : ".json,.md,.txt,application/json,text/markdown,text/plain"}
         onChange={(e) => {
           void importDesign(kind, e.target.files?.[0]);
           e.target.value = "";
@@ -439,8 +439,8 @@ export default function Workspace() {
   );
   function designValid() {
     try {
-      parseDesignFile("schema", config.schema);
-      parseDesignFile("taxonomy", config.taxonomy);
+      const schema = parseDesignFile("schema", config.schema);
+      const taxonomy = parseDesignFile("taxonomy", config.taxonomy);
       if (!Array.isArray(JSON.parse(config.examples)))
         throw Error("Examples must be an array.");
       if (
@@ -452,21 +452,24 @@ export default function Workspace() {
       if (!/^[\x21-\x7e]{1,200}$/.test(config.model.trim()))
         throw Error("Model ID must use printable ASCII without spaces.");
       setError("");
-      return true;
+      if (schema !== config.schema || taxonomy !== config.taxonomy)
+        setConfig((c) => ({ ...c, schema, taxonomy }));
+      return { ...config, schema, taxonomy };
     } catch (e) {
       setError(String(e));
-      return false;
+      return null;
     }
   }
   async function validateDesign() {
-    if (!designValid()) return;
+    const normalized = designValid();
+    if (!normalized) return;
     try {
       const result = await api<{ valid: boolean; taxonomy_chars: number; properties: number; examples: number }>("/design/validate", "POST", {
-        objective: config.objective,
-        taxonomy: config.taxonomy,
-        model: config.model,
-        schema: config.schema,
-        examples: config.examples,
+        objective: normalized.objective,
+        taxonomy: normalized.taxonomy,
+        model: normalized.model,
+        schema: normalized.schema,
+        examples: normalized.examples,
       });
       setNotice(`Design valid · ${result.taxonomy_chars} taxonomy characters · ${result.properties} schema properties · ${result.examples} examples`);
     } catch (e) {
@@ -479,14 +482,15 @@ export default function Workspace() {
       return;
     }
     const issue = validate(config);
-    if (issue || !designValid()) {
+    const normalized = issue ? null : designValid();
+    if (issue || !normalized) {
       if (issue) setError(issue);
       return;
     }
     try {
       setLaunching(true);
       const run = await api<Run>("/runs", "POST", {
-        config,
+        config: normalized,
         steps: normalizeTrace(raw),
         execution,
       });
@@ -982,6 +986,8 @@ export default function Workspace() {
                       {templateButtons}
                       <p className="evaluation-copy">
                         Apply the example or provide your own taxonomy and output schema.
+                        Taxonomy accepts Markdown or JSON (an array of categories or section
+                        object); the schema accepts JSON or Markdown with a fenced JSON block.
                         Test files: <a href="/test-data/output-schema.json" download>output schema</a>
                         {" · "}<a href="/test-data/TAXONOMY.md" download>taxonomy</a>.
                       </p>
@@ -1011,18 +1017,19 @@ export default function Workspace() {
                       </div>
                       <div className="design-preview-grid">
                         <Field
-                          label="Taxonomy (Markdown)"
+                          label="Taxonomy (Markdown or JSON)"
                           area
                           value={config.taxonomy}
                           change={(v) => update("taxonomy", v)}
                         />
                         <Field
-                          label="Output schema (JSON)"
+                          label="Output schema (JSON or Markdown with fenced JSON)"
                           area
                           value={config.schema}
                           change={(v) => update("schema", v)}
                         />
-                        <details className="optional-field">
+                      </div>
+                      <details className="optional-field few-shot-field">
                           <summary>Optional few-shot examples</summary>
                           <div className="toolbar">
                             {fewShotPresets.map((preset) => (
@@ -1065,8 +1072,7 @@ export default function Workspace() {
                             value={config.examples}
                             change={(v) => update("examples", v)}
                           />
-                        </details>
-                      </div>
+                      </details>
                     </div>
                   </div>
                 )}

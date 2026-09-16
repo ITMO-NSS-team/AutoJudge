@@ -28,6 +28,30 @@ test('taxonomy import trims text and rejects empty files', () => {
   assert.equal(parseDesignFile('taxonomy', '\uFEFF  # Taxonomy\n\n- unsupported_claim  '), '# Taxonomy\n\n- unsupported_claim');
   assert.throws(() => parseDesignFile('taxonomy', '   '));
 });
+test('taxonomy accepts JSON arrays and section objects as Markdown', () => {
+  const arr = parseDesignFile('taxonomy', '["unsupported_claim", "tool_error"]');
+  assert.match(arr, /# Taxonomy/);
+  assert.match(arr, /- unsupported_claim/);
+  assert.match(arr, /- tool_error/);
+  const obj = parseDesignFile('taxonomy', '{"Search integrity":["factuality"],"Execution strategy":"logic soundness"}');
+  assert.match(obj, /## Search integrity/);
+  assert.match(obj, /## Execution strategy/);
+  assert.match(obj, /- factuality/);
+  assert.match(obj, /- logic soundness/);
+  assert.equal(parseDesignFile('taxonomy', '# Keep\n- as is'), '# Keep\n- as is');
+  assert.throws(() => parseDesignFile('taxonomy', '[1, 2]'));
+  assert.throws(() => parseDesignFile('taxonomy', '{"Empty": []}'));
+});
+test('output schema accepts Markdown with a fenced JSON block', () => {
+  const md = '# Schema\n\n```json\n{"type":"object","properties":{"verdict":{"type":"string"}}}\n```\n';
+  const schema = JSON.parse(parseDesignFile('schema', md));
+  assert.equal(schema.type, 'object');
+  assert.ok(schema.properties.verdict);
+  const bare = parseDesignFile('schema', '```{"type":"object"}```');
+  assert.equal(JSON.parse(bare).type, 'object');
+  assert.throws(() => parseDesignFile('schema', '# Schema\n\n```json\n{"type":"array"}\n```'));
+  assert.throws(() => parseDesignFile('schema', 'just prose without JSON'));
+});
 test('raw nested OpenTelemetry spans become chronological trace steps', () => {
   const raw = {
     trace_id: 'trace-1',

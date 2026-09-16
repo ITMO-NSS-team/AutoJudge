@@ -1,9 +1,45 @@
+function extractFencedJson(text: string): string {
+  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  return fence ? fence[1].trim() : text;
+}
+
+function taxonomyFromJson(data: unknown): string {
+  if (Array.isArray(data)) {
+    if (!data.length || data.some((item) => typeof item !== 'string' || !item.trim()))
+      throw Error('A JSON taxonomy must be a non-empty array of category strings.');
+    return ['# Taxonomy', '', ...data.map((item) => `- ${item.trim()}`)].join('\n');
+  }
+  if (data && typeof data === 'object') {
+    const entries = Object.entries(data as Record<string, unknown>);
+    if (!entries.length) throw Error('The JSON taxonomy object is empty.');
+    const lines = ['# Taxonomy'];
+    for (const [key, value] of entries) {
+      if (typeof value === 'string' && value.trim()) lines.push('', `## ${key}`, `- ${value.trim()}`);
+      else if (Array.isArray(value) && value.length && value.every((item) => typeof item === 'string' && item.trim()))
+        lines.push('', `## ${key}`, ...value.map((item) => `- ${item.trim()}`));
+      else throw Error('JSON taxonomy values must be category strings or arrays of them.');
+    }
+    return lines.join('\n');
+  }
+  throw Error('A JSON taxonomy must be an array of categories or an object of sections.');
+}
+
 export function parseDesignFile(kind: 'schema' | 'taxonomy', input: string): string {
   const text = input.replace(/^\uFEFF/, '').trim();
   if (!text) throw Error('The file is empty.');
-  if (kind === 'taxonomy') return text;
-  const schema = JSON.parse(text);
-  if (!schema || Array.isArray(schema) || schema.type !== 'object') throw Error('The output schema must describe a JSON object.');
+  if (kind === 'taxonomy') {
+    // Markdown passes through unchanged; JSON arrays/objects become Markdown.
+    try { return taxonomyFromJson(JSON.parse(text)); } catch (e) {
+      if (text.startsWith('[') || text.startsWith('{')) throw e;
+      return text;
+    }
+  }
+  // Schema: raw JSON, or JSON inside a Markdown code fence.
+  let schema: unknown;
+  try { schema = JSON.parse(extractFencedJson(text)); }
+  catch { throw Error('The output schema must be a JSON object or a Markdown file with a fenced JSON block.'); }
+  if (!schema || Array.isArray(schema) || (schema as { type?: string }).type !== 'object')
+    throw Error('The output schema must describe a JSON object.');
   const check = (value: unknown): void => {
     if (value && typeof value === 'object') for (const [key, child] of Object.entries(value)) {
       if (['$ref', '$dynamicRef', '$recursiveRef'].includes(key)) throw Error('Schema references are not yet supported by the runner.');
