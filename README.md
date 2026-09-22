@@ -109,9 +109,6 @@ OPENROUTER_API_KEY=sk-or-...
 POOL_GEN_MODEL=google/gemini-2.5-flash   # any OpenRouter model id
 POOL_GEN_TEMPERATURE=0.3                 # required by PoolGenerator
 
-# Graph generation (only if you use the LLM GraphGenerator)
-GRAPH_GEN_MODEL=google/gemini-2.5-flash
-
 # Judges (pipeline nodes)
 AGENT_NODE_MODEL=google/gemini-2.5-flash
 AGENT_NODE_TEMPERATURE=0.1
