@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 REPO = Path(__file__).resolve().parents[3]
-DEFAULT_ARTIFACTS = REPO / "experiments/fixed_pool_comparison"
+DEFAULT_ARTIFACTS = REPO / "rebuttal/fixed_pool_comparison"
 MAIN = "main_20261109_01"
 
 

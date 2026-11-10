@@ -1,4 +1,4 @@
-# Who&When metric reproduction for Reviewer Question 3
+# Who&When attribution metric reproduction
 
 This package reproduces the retained 58-trace Hand run corresponding to the
 Gemini 2.5 Flash / Gemini 2.5 Flash row in Table 10. It documents failure-agent
