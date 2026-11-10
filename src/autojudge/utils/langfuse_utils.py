@@ -26,6 +26,9 @@ def check_langfuse_env() -> bool:
 def setup_langfuse_instrumentation() -> None:
     global _instrumentation_enabled, langfuse
 
+    if os.getenv("AUTOJUDGE_DISABLE_TRACING") == "1":
+        return
+
     if _instrumentation_enabled:
         return
 

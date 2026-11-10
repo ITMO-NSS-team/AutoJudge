@@ -18,6 +18,15 @@ from .types import CostBreakdown, ExecutionLevels, NodeTrace, PipelineTrace
 logger = get_logger()
 
 
+class PipelineExecutionError(RuntimeError):
+    """Keep node failures available to callers after all parallel nodes finish."""
+
+    def __init__(self, errors: list[tuple[str, Exception]]):
+        self.node_errors = errors
+        details = "; ".join(f"{name}: {error}" for name, error in errors)
+        super().__init__(f"Failed to execute level with {len(errors)} error(s): {details}")
+
+
 class Pipeline:
     """Pipeline for executing DAG of agents."""
 
@@ -145,10 +154,7 @@ class Pipeline:
 
         # If any node failed, raise an exception with details
         if errors:
-            error_details = "; ".join([f"{name}: {err}" for name, err in errors])
-            raise RuntimeError(
-                f"Failed to execute level with {len(errors)} error(s): {error_details}"
-            )
+            raise PipelineExecutionError(errors) from errors[0][1]
 
     async def ainvoke(self, query: Any) -> Any:
         """Asynchronous pipeline execution."""

@@ -1,6 +1,7 @@
 import os
 from typing import List, Optional
 from pydantic import BaseModel
+from pydantic_ai.models import Model
 from autojudge.agent_pool import AgentPool
 from autojudge.pipeline.node import AgentNode
 from autojudge.utils import get_logger
@@ -32,8 +33,14 @@ class PoolGenerator(BaseMetaAgent):
         taxonomy: str = "",
         examples: str = "",
         use_summary: bool = False,
+        model_override: Optional[Model] = None,
+        system_prompt_override: Optional[str] = None,
+        judge_model: Optional[str] = None,
+        retries: int = 3,
+        instrument: bool = True,
     ):
-        if os.environ['POOL_GEN_TEMPERATURE'] != temperature:
+        configured_temperature = os.getenv("POOL_GEN_TEMPERATURE")
+        if configured_temperature is not None and float(configured_temperature) != temperature:
             print('ATTENTION: Found another PoolGenerator temperature in config file: ', os.getenv("POOL_GEN_TEMPERATURE"))
         print(
             f"Initializing PoolGenerator with model={model}, temperature={temperature}, summary: {use_summary}"
@@ -43,12 +50,19 @@ class PoolGenerator(BaseMetaAgent):
         self.schema = output_schema
         self.taxonomy = taxonomy
         self.examples = examples
+        self.system_prompt_override = system_prompt_override
+        self.judge_model = judge_model
         super().__init__(
             model=model,
             temperature=temperature,
+            model_override=model_override,
+            retries=retries,
+            instrument=instrument,
         )
 
     def _get_system_prompt(self) -> str:
+        if self.system_prompt_override is not None:
+            return self.system_prompt_override
         if not self.summary:
             return DEFAULT_POOL_INSTRUCT_EXTENDED_no_db_tool.substitute(
                 taxonomy=self.taxonomy,
@@ -75,7 +89,7 @@ class PoolGenerator(BaseMetaAgent):
             AgentNode(
                 name=schema.name,
                 instructions=schema.instructions,
-                model=schema.model,
+                model=self.judge_model or schema.model,
                 mcp_tools=[schema.mcp_tools],  # kept original wrapping
                 use_tools=self.use_tools,       # added from new version
             )

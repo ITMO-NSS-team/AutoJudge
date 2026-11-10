@@ -10,6 +10,7 @@ from zipfile import ZipFile
 
 
 ROOT = Path(__file__).resolve().parent
+REPO = ROOT.parents[1]
 MAIN = "main_20261109_01/experiment/"
 
 
@@ -67,10 +68,8 @@ def verify() -> dict:
                     raise ValueError(f"Run checksum mismatch: {run + name}")
 
         for name in read(MAIN + "source_publication.json")["files"]:
-            if (ROOT / "source" / name).read_bytes() != archive.read(MAIN + "source_snapshot/" + name):
+            if (REPO / name).read_bytes() != archive.read(MAIN + "source_snapshot/" + name):
                 raise ValueError(f"Repository source differs from archive source: {name}")
-        if (ROOT / "source/campaign/launcher.py").read_bytes() != archive.read("campaign/launcher.py"):
-            raise ValueError("Launcher source differs")
         for name in ["report.md", "report.json", "source_publication.json"]:
             if (ROOT / name).read_bytes() != archive.read(MAIN + name):
                 raise ValueError(f"Repository summary differs from archive: {name}")

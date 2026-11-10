@@ -1,10 +1,21 @@
 # Adaptive versus fixed judge-pool comparison
 
-This package contains the complete paired comparison on all 126 Who&When
-Algorithm-Generated traces, its six-trace technical pilot, and all four initial
-smoke attempts. Both methods use Gemini 2.5 Flash for every component, six
-intermediate judges, the same fixed aggregator, and eight planned calls per trace.
-The fixed pool gets an evidence-extraction call instead of pool generation.
+The experiment uses the repository's **`src/autojudge` library**:
+`PoolGenerator`, `AgentPool`, `AgentNode`, `PipelineBuilder`, and `NodeSession`.
+It does not carry a separate runtime or reimplement the evaluation graph.
+
+- [Experiment entry point](../../examples/who_and_when/run_fixed_pool_experiment.py)
+- [Experiment-specific transport, protocol, and reporting](../../examples/who_and_when/fixed_pool/)
+- [Configuration](../../docs/experiments/fixed-pool-config.json)
+- [Mock-transport tests](../../tests/test_ww_fixed_pool_experiment.py)
+- [Complete experiment archive](fixed_pool_comparison.zip)
+- [Main report](report.md) and [machine-readable results](report.json)
+- [Offline archive verifier](verify.py)
+
+The paired experiment covers all 126 Who&When Algorithm-Generated traces. Both
+methods use Gemini 2.5 Flash throughout, six intermediate judges, the same fixed
+aggregator, and eight planned calls per trace. The fixed pool gets an evidence
+extraction call instead of pool generation.
 
 | Method | Agent Accuracy | Exact Step Accuracy | Recorded inference cost |
 | --- | ---: | ---: | ---: |
@@ -13,85 +24,70 @@ The fixed pool gets an evidence-extraction call instead of pool generation.
 
 The paired Step Accuracy difference is +4.76 percentage points, with a 95%
 trace-bootstrap interval of [−3.17, +12.70]. Each method has one failed trace,
-counted as incorrect. Costs include retries and failed attempts. Matching the
-model allocation and stagewise limits does not imply identical realized spending.
+counted as incorrect. Costs include retries and failed attempts. Matching model
+allocation and stagewise limits does not imply identical realized spending.
 
-- [fixed_pool_comparison.zip](fixed_pool_comparison.zip): raw requests, responses,
-  SSE streams, generated judges, evidence, final predictions, native pipeline
-  histories, pinned public datasets, frozen prompts/configuration, source
-  snapshots, manifests, and checksums.
-- [source/](source/): the main run's execution-time source snapshot, including its
-  AutoJudge runtime, CLI, tests, and launcher, under neutral module names.
-- [report.md](report.md) and [report.json](report.json): the main results, including
-  the 81 traces without Hand overlap and the 45 overlapping traces.
-- [source_publication.json](source_publication.json): original execution hashes
-  and published hashes for the source files.
-- [verify.py](verify.py): offline archive, source, and metric verification.
+## Reproduce the report without model calls
 
-## Verify the saved experiment without model calls
-
-Requires Python 3.12 or newer. Archive verification itself uses only the standard
-library:
+Run from the repository root. Python 3.12 or newer is required for the recorded
+dependency versions; archive verification itself uses only the standard library.
 
 ```bash
-cd experiments/fixed_pool_comparison
-python verify.py
-python -m zipfile -e fixed_pool_comparison.zip extracted
-```
-
-To recompute the metrics and paired intervals with the experiment's own code:
-
-```bash
+python experiments/fixed_pool_comparison/verify.py
+python -m zipfile -e experiments/fixed_pool_comparison/fixed_pool_comparison.zip \
+  experiments/fixed_pool_comparison/extracted
 python -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
-cd source
-../.venv/bin/python examples/who_and_when/run_fixed_pool_experiment.py report \
-  --output-dir ../extracted/main_20261109_01/experiment
-../.venv/bin/python -m pytest tests/test_ww_fixed_pool_experiment.py
+.venv/bin/python -m pip install -r experiments/fixed_pool_comparison/requirements.txt
+.venv/bin/python examples/who_and_when/run_fixed_pool_experiment.py report \
+  --output-dir experiments/fixed_pool_comparison/extracted/main_20261109_01/experiment
+.venv/bin/python -m pytest tests/test_ww_fixed_pool_experiment.py
 ```
 
-The test suite simulates model responses with `httpx.MockTransport`. Neither
-reporting nor the tests require API credentials or send inference requests.
-The dataset revision is `59b9fcba1aaed7bbf206b5f4d3c68b8face2f49c`.
+The entry point imports the library from this checkout's `src/autojudge`.
+The test suite simulates model responses with `httpx.MockTransport`. Reporting
+and tests require no API credentials and send no inference requests.
 
 ## Start a new paired run
 
-From `source/`, using the same Python environment:
+From the repository root, using the environment above:
 
 ```bash
-../.venv/bin/python examples/who_and_when/run_fixed_pool_experiment.py prepare \
-  --phase pilot --output-dir ../new_runs/pilot
-../.venv/bin/python examples/who_and_when/run_fixed_pool_experiment.py run \
-  --output-dir ../new_runs/pilot --max-cost-usd 4
-../.venv/bin/python examples/who_and_when/run_fixed_pool_experiment.py prepare \
-  --phase main --output-dir ../new_runs/main
-../.venv/bin/python examples/who_and_when/run_fixed_pool_experiment.py run \
-  --output-dir ../new_runs/main --pilot-dir ../new_runs/pilot --max-cost-usd 22
+.venv/bin/python examples/who_and_when/run_fixed_pool_experiment.py prepare \
+  --phase pilot --output-dir experiments/fixed_pool_comparison/new_runs/pilot
+.venv/bin/python examples/who_and_when/run_fixed_pool_experiment.py run \
+  --output-dir experiments/fixed_pool_comparison/new_runs/pilot --max-cost-usd 4
+.venv/bin/python examples/who_and_when/run_fixed_pool_experiment.py prepare \
+  --phase main --output-dir experiments/fixed_pool_comparison/new_runs/main
+.venv/bin/python examples/who_and_when/run_fixed_pool_experiment.py run \
+  --output-dir experiments/fixed_pool_comparison/new_runs/main \
+  --pilot-dir experiments/fixed_pool_comparison/new_runs/pilot --max-cost-usd 22
 ```
 
 `prepare` downloads the pinned public dataset without invoking a model. `run`
 requires `OPENROUTER_API_KEY` and incurs inference charges. Limits are cumulative
-for each output directory. A completed pilot with the same frozen settings and
-source hashes is required before the main run. Exact future predictions and
-charges can vary with provider behavior.
+for each output directory. A completed pilot with identical frozen settings and
+source hashes is required before the main run. Future predictions and charges
+can vary with provider behavior. The dataset revision is
+`59b9fcba1aaed7bbf206b5f4d3c68b8face2f49c`.
 
-## Source and artifact provenance
+## Provenance
 
-Requests, responses, streams, inputs, labels, predictions, datasets, frozen
-protocols, run manifests, and result reports are byte-identical to the recorded
-experiment. Source module/import paths, CLI descriptions, session labels, and
-administrative paths were normalized for publication. The launcher uses a
-relative checkout root. Internal planning documents were omitted. No scientific
-prompts, evaluation logic, model settings, or recorded predictions were changed.
+The ZIP retains the main experiment, its six-trace technical pilot, and all four
+initial smoke attempts. It contains requests, responses, SSE streams, generated
+judges, evidence, final predictions, pipeline histories, public datasets, frozen
+prompts/configuration, source snapshots, and checksums. Historical source
+snapshots are retained **inside the archive**, rather than as a second library
+in the repository.
 
-Each run's `source_publication.json` distinguishes executed source fingerprints
-from published fingerprints. The frozen protocol retains its original execution
-fingerprints and must not be rewritten to resume an old run with renamed source.
-Use `report` for offline recomputation and `prepare` to create a fresh run.
-The saved `artifact_audit.json` describes the original pre-publication audit;
-`verify.py` checks the published package. Source snapshots for the earlier smoke
-attempts are kept separately because their transport implementation differs.
+Scientific inference artifacts and frozen protocols are byte-identical to the
+recorded experiment. Module names, CLI descriptions, session labels, and
+administrative paths were normalized for publication; internal planning documents
+were omitted. No model-facing prompts, evaluation logic, settings, or recorded
+predictions were changed. [source_publication.json](source_publication.json)
+distinguishes executed source fingerprints from published fingerprints.
 
-Checksums for the published archive are regenerated at both run and bundle
-levels. The bundle's `publication.json` records administrative changes and the
-original bundle fingerprint. API keys and `.env` files are not included.
+The frozen protocol retains its original execution fingerprints. Use `report`
+for offline recomputation and `prepare` to create a fresh run with the published
+paths. The saved `artifact_audit.json` describes the pre-publication audit;
+`verify.py` checks the public archive and its source against this repository.
+Credentials and `.env` files are not included.

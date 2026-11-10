@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel
 from pydantic_ai import Agent, ModelSettings, RunUsage
 from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models import Model
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 
 from autojudge.pipeline.types import UsageTrackingMixin
@@ -31,9 +32,11 @@ class BaseMetaAgent(UsageTrackingMixin, ABC):
         max_tokens: int = DEFAULT_MAX_TOKENS,
         timeout: int = DEFAULT_TIMEOUT,
         retries: int = DEFAULT_RETRIES,
+        model_override: Optional[Model] = None,
+        instrument: bool = True,
     ):
         self.api_key = os.getenv("OPENROUTER_API_KEY") or ""
-        if not self.api_key:
+        if not self.api_key and model_override is None:
             raise RuntimeError(
                 "No OPENROUTER_API_KEY provided. Set it in environment or pass as argument."
             )
@@ -46,8 +49,9 @@ class BaseMetaAgent(UsageTrackingMixin, ABC):
         self.max_tokens = max_tokens
         self.timeout = timeout
         self.retries = retries
+        self.instrument = instrument
 
-        self._model = self._create_model()
+        self._model = model_override if model_override is not None else self._create_model()
         self.agent = self._create_agent()
         self._usage: Optional[RunUsage] = None
 
@@ -78,7 +82,7 @@ class BaseMetaAgent(UsageTrackingMixin, ABC):
             output_type=output_type,
             system_prompt=system_prompt,
             retries=self.retries,
-            instrument=True,
+            instrument=self.instrument,
         )
 
     @abstractmethod
