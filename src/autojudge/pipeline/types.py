@@ -29,6 +29,7 @@ class NodeTrace(BaseModel):
     model: str
     message_history: List[ModelMessage]
     usage: Optional[RunUsage] = None
+    decision: Optional[dict[str, Any]] = None
 
 
 class PipelineTrace(BaseModel):

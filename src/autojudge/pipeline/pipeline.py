@@ -6,11 +6,14 @@ import io
 from pathlib import Path
 from typing import Any, Optional
 
+import httpx
 import requests
 from PIL import Image
 
+from autojudge.model_connection import model_http_client
 from autojudge.utils.logger import get_artifact_path, get_logger
 
+from .decisions import DecisionNode, DecisionTrace
 from .node import AgentNode
 from .node_session import NodeExecution, NodeSession
 from .types import CostBreakdown, ExecutionLevels, NodeTrace, PipelineTrace
@@ -74,7 +77,9 @@ class Pipeline:
 
         return levels
 
-    async def _execute_node(self, node: AgentNode) -> Any:
+    async def _execute_node(
+        self, node: AgentNode, decision_client: httpx.AsyncClient | None = None
+    ) -> Any:
         """Execute a single node."""
         # Check if already executed
         if node.id in self.node_session.node_executions:
@@ -86,25 +91,34 @@ class Pipeline:
         # Validate that all dependencies are satisfied
         self.node_session.validate_dependencies(node)
 
-        # Build input for this node
-        node_input = self.node_session.get_input_for_node(node)
-
-        # Execute agent
         logger.info(f"Executing node: {node.name} (id: {node.id})")
-        agent = node.build_agent()
-        result = await agent.run(node_input)
+        decision = None
+        if isinstance(node, DecisionNode):
+            if decision_client is None:
+                raise RuntimeError("Decision node has no HTTP client")
+            evidence = DecisionTrace.model_validate_json(self.node_session.original_query)
+            output, receipt = await node.decide(
+                decision_client, evidence, self.node_session._collect_parent_results(node)
+            )
+            decision = receipt.model_dump(mode="json")
+            messages = []
+            model = receipt.model
+        else:
+            agent = node.build_agent()
+            result = await agent.run(self.node_session.get_input_for_node(node))
+            output = result.output
+            node._usage = result.usage()
+            messages = result.all_messages()
+            model = node.model
         logger.info(f"Completed node: {node.name} (id: {node.id})")
 
-        # Store usage in node for cost tracking
-        node._usage = result.usage()
-
-        # Store node trace
         node_trace = NodeTrace(
             node_id=node.id,
             node_name=node.name,
-            model=node.model,
-            message_history=result.all_messages(),
-            usage=result.usage(),
+            model=model,
+            message_history=messages,
+            usage=node._usage,
+            decision=decision,
         )
 
         if self._trace is not None:
@@ -114,13 +128,15 @@ class Pipeline:
         execution = NodeExecution(
             node_id=node.id,
             node_name=node.name,
-            output=result.output,
+            output=output,
         )
         self.node_session.add_node_execution(execution)
 
-        return result.output
+        return output
 
-    async def _execute_level(self, level_nodes: list[AgentNode]) -> None:
+    async def _execute_level(
+        self, level_nodes: list[AgentNode], decision_client: httpx.AsyncClient | None
+    ) -> None:
         """Execute all nodes in a level concurrently using asyncio.gather()."""
         if not level_nodes:
             return
@@ -133,7 +149,7 @@ class Pipeline:
             )
 
         # Execute all nodes concurrently
-        tasks = [self._execute_node(node) for node in level_nodes]
+        tasks = [self._execute_node(node, decision_client) for node in level_nodes]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Check for exceptions and log them
@@ -150,10 +166,25 @@ class Pipeline:
                 f"Failed to execute level with {len(errors)} error(s): {error_details}"
             )
 
-    async def ainvoke(self, query: Any) -> Any:
+    async def ainvoke(
+        self, query: Any, *, decision_client: httpx.AsyncClient | None = None
+    ) -> Any:
         """Asynchronous pipeline execution."""
-        # Set original query in node session
-        query_str = str(query)
+        has_decisions = any(isinstance(node, DecisionNode) for node in self.execution_order)
+        if has_decisions and decision_client is None:
+            async with model_http_client() as client:
+                return await self.ainvoke(query, decision_client=client)
+
+        self.node_session = NodeSession()
+        if has_decisions:
+            trace = (
+                DecisionTrace.model_validate_json(query)
+                if isinstance(query, str)
+                else DecisionTrace.model_validate(query)
+            )
+            query_str = trace.model_dump_json()
+        else:
+            query_str = str(query)
         self.node_session.set_original_query(query_str)
 
         # Initialize pipeline trace
@@ -169,7 +200,7 @@ class Pipeline:
         # Execute nodes level by level (nodes within a level run concurrently)
         for level_idx, level_nodes in enumerate(self._execution_levels):
             logger.info(f"Executing level {level_idx} with {len(level_nodes)} node(s)")
-            await self._execute_level(level_nodes)
+            await self._execute_level(level_nodes, decision_client)
             logger.info(f"Completed level {level_idx}")
 
         # Return result of the final node (last in execution order)
@@ -180,7 +211,8 @@ class Pipeline:
         self._trace.final_output = final_output
 
         logger.info(f"Pipeline completed. Final result from: {final_node.name}")
-        print(final_output)
+        if not has_decisions:
+            print(final_output)
         return final_output
 
     def invoke(self, query: Any) -> Any:

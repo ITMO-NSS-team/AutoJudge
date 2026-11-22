@@ -8,7 +8,7 @@ from typing import List, Optional
 from dotenv import load_dotenv
 from pydantic_ai import Agent, RunUsage
 from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.providers.openrouter import OpenRouterProvider
+from autojudge.model_connection import chat_api_key, chat_provider
 
 from autojudge.db.db_tools import get_content_tool
 from autojudge.pipeline.types import UsageTrackingMixin
@@ -37,17 +37,12 @@ class AgentNode(UsageTrackingMixin):
     parents: List["AgentNode"] = field(default_factory=list)
     _usage: Optional[RunUsage] = field(default=None, init=False, repr=False)
 
-    def __post_init__(self):
-        if not self.api_key:
-            self.api_key = os.getenv("OPENROUTER_API_KEY")
-        if not self.api_key:
-            raise RuntimeError("No API key provided")
-
     def build_agent(self) -> Agent:
+        api_key = self.api_key or chat_api_key()
         print('Judge model: ', self.model)
         model = OpenAIChatModel(
             self.model,
-            provider=OpenRouterProvider(api_key=self.api_key or ""),
+            provider=chat_provider(api_key),
             settings={"temperature": AGENT_NODE_TEMPERATURE},
         )
 
@@ -59,7 +54,6 @@ class AgentNode(UsageTrackingMixin):
             tools=tools,
             instructions=self.instructions,
             retries=3,
-            instrument=True,
         )
 
     def add_child(self, child: "AgentNode") -> None:

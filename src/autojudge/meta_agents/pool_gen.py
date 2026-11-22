@@ -33,7 +33,8 @@ class PoolGenerator(BaseMetaAgent):
         examples: str = "",
         use_summary: bool = False,
     ):
-        if os.environ['POOL_GEN_TEMPERATURE'] != temperature:
+        configured_temperature = os.getenv("POOL_GEN_TEMPERATURE")
+        if configured_temperature is not None and float(configured_temperature) != temperature:
             print('ATTENTION: Found another PoolGenerator temperature in config file: ', os.getenv("POOL_GEN_TEMPERATURE"))
         print(
             f"Initializing PoolGenerator with model={model}, temperature={temperature}, summary: {use_summary}"

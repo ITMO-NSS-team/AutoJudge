@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel
 from pydantic_ai import Agent, ModelSettings, RunUsage
 from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.providers.openrouter import OpenRouterProvider
+from autojudge.model_connection import chat_api_key, chat_provider
 
 from autojudge.pipeline.types import UsageTrackingMixin
 from autojudge.utils.langfuse_utils import setup_langfuse_instrumentation
@@ -32,11 +32,7 @@ class BaseMetaAgent(UsageTrackingMixin, ABC):
         timeout: int = DEFAULT_TIMEOUT,
         retries: int = DEFAULT_RETRIES,
     ):
-        self.api_key = os.getenv("OPENROUTER_API_KEY") or ""
-        if not self.api_key:
-            raise RuntimeError(
-                "No OPENROUTER_API_KEY provided. Set it in environment or pass as argument."
-            )
+        self.api_key = chat_api_key()
 
         if not 0.0 <= temperature <= 1.0:
             raise ValueError(f"Temperature must be in [0.0, 1.0], got {temperature}")
@@ -60,7 +56,7 @@ class BaseMetaAgent(UsageTrackingMixin, ABC):
 
         return OpenAIChatModel(
             self.model,
-            provider=OpenRouterProvider(api_key=self.api_key),
+            provider=chat_provider(self.api_key),
             settings=settings,
         )
 
@@ -78,7 +74,6 @@ class BaseMetaAgent(UsageTrackingMixin, ABC):
             output_type=output_type,
             system_prompt=system_prompt,
             retries=self.retries,
-            instrument=True,
         )
 
     @abstractmethod

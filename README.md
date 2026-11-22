@@ -194,6 +194,40 @@ Ready-made taxonomies and output schemas for the paper's benchmarks live in
 
 A complete worked example — a real Who&When-style trace, the judges AutoJudge generated for it, their prompts, and the final verdict — is in [`example.md`](example.md).
 
+### Compare Jev judges on Who&When
+
+The full-trace runner offers three modes: `chat` runs the existing LLM judges,
+`pool` asks a chat MetaAgent to generate specialist questions for each trace
+and runs all specialists and the final aggregator with `typesafe/jev-1.14`,
+and `direct` asks Jev for the attribution in one call without a pool.
+Jev selects a trace message. Its author and 1-based position become `agent`
+and `step`. The result records the selected message and decision receipts
+instead of a generated explanation.
+
+With `OPENROUTER_API_KEY` set, run all three modes on the first three traces:
+
+```bash
+uv run --group benchmarks python examples/who_and_when/run_jev.py Algorithm-Generated.parquet \
+    --output /tmp/who-when-jev.jsonl --limit 3
+```
+
+The input is a [Who&When Parquet file](https://huggingface.co/datasets/Kevin355/Who_and_When/tree/main)
+or JSONL with the original `question_ID`, `question`, `history`, `mistake_agent`,
+and `mistake_step` columns. Labels stay in the scorer. Use `--mode pool direct`
+to skip chat. The runner writes one record per attempt and reports exact agent
+and step accuracy, elapsed time, failures, and recorded cost per mode. Jev cost
+comes from provider receipts. Chat and MetaAgent costs are estimates and can be
+unavailable for models missing from the pricing catalog.
+
+To use OmniRoute, set `OMNIROUTE_BASE_URL` and `OMNIROUTE_API_KEY`, and choose
+the gateway's model IDs via `POOL_GEN_MODEL` and `AGENT_NODE_MODEL`.
+The chat client uses the gateway's OpenAI-compatible `/v1` API. The Jev modes
+also require `OMNIROUTE_DECISIONS_URL`, the full URL of an OpenRouter-compatible
+Decisions endpoint on that gateway. Alternatively, to keep chat on OmniRoute and run Jev directly on OpenRouter,
+set `OPENROUTER_DECISIONS_URL=https://openrouter.ai/api/alpha/decisions` and a separate
+`OPENROUTER_API_KEY`. Set only one Decisions URL. The Jev modes fail before
+inference if neither route is configured for an OmniRoute setup.
+
 ### Long traces: summary + retrieval mode
 
 For traces that don't fit a context window:
