@@ -13,7 +13,7 @@ from PIL import Image
 from autojudge.model_connection import model_http_client
 from autojudge.utils.logger import get_artifact_path, get_logger
 
-from .decisions import DecisionNode, DecisionTrace
+from .decisions import DECISION_CONCURRENCY, DecisionNode, DecisionTrace
 from .node import AgentNode
 from .node_session import NodeExecution, NodeSession
 from .types import CostBreakdown, ExecutionLevels, NodeTrace, PipelineTrace
@@ -83,9 +83,7 @@ class Pipeline:
         """Execute a single node."""
         # Check if already executed
         if node.id in self.node_session.node_executions:
-            logger.debug(
-                f"Node '{node.name}' already executed, returning cached result"
-            )
+            logger.debug(f"Node '{node.name}' already executed, returning cached result")
             return self.node_session.node_executions[node.id].output
 
         # Validate that all dependencies are satisfied
@@ -144,12 +142,18 @@ class Pipeline:
         # Log which nodes will be executed concurrently
         node_names = [f"{node.name} (id: {node.id})" for node in level_nodes]
         if len(level_nodes) > 1:
-            logger.info(
-                f"Executing {len(level_nodes)} nodes concurrently: {', '.join(node_names)}"
-            )
+            logger.info(f"Executing {len(level_nodes)} nodes concurrently: {', '.join(node_names)}")
 
         # Execute all nodes concurrently
-        tasks = [self._execute_node(node, decision_client) for node in level_nodes]
+        decision_slots = asyncio.Semaphore(DECISION_CONCURRENCY)
+
+        async def execute(node: AgentNode) -> Any:
+            if isinstance(node, DecisionNode):
+                async with decision_slots:
+                    return await self._execute_node(node, decision_client)
+            return await self._execute_node(node, decision_client)
+
+        tasks = [execute(node) for node in level_nodes]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Check for exceptions and log them
@@ -161,14 +165,14 @@ class Pipeline:
 
         # If any node failed, raise an exception with details
         if errors:
-            error_details = "; ".join([f"{name}: {err}" for name, err in errors])
+            error_details = "; ".join(
+                [f"{name}: {type(err).__name__}: {err}" for name, err in errors]
+            )
             raise RuntimeError(
                 f"Failed to execute level with {len(errors)} error(s): {error_details}"
             )
 
-    async def ainvoke(
-        self, query: Any, *, decision_client: httpx.AsyncClient | None = None
-    ) -> Any:
+    async def ainvoke(self, query: Any, *, decision_client: httpx.AsyncClient | None = None) -> Any:
         """Asynchronous pipeline execution."""
         has_decisions = any(isinstance(node, DecisionNode) for node in self.execution_order)
         if has_decisions and decision_client is None:
@@ -256,9 +260,7 @@ class Pipeline:
             total_price=total_input + total_output,
         )
 
-    def to_mermaid_lr(
-        self, visualize: bool = True, output_path: Optional[str] = None
-    ) -> str:
+    def to_mermaid_lr(self, visualize: bool = True, output_path: Optional[str] = None) -> str:
         """Generate Mermaid diagram in LR format. Optionally save as PNG image."""
         lines = ["graph LR"]
 
@@ -292,9 +294,7 @@ class Pipeline:
                 parent_safe = parent_node.name.replace(" ", "_")
                 child_safe = child_node.name.replace(" ", "_")
 
-                lines.append(
-                    f"    {parent_id}[{parent_safe}] --> {child_id}[{child_safe}]"
-                )
+                lines.append(f"    {parent_id}[{parent_safe}] --> {child_id}[{child_safe}]")
 
         mermaid_graph = "\n".join(lines)
 
@@ -304,9 +304,7 @@ class Pipeline:
 
         return mermaid_graph
 
-    def _save_mermaid_graph(
-        self, graph: str, output_path: Optional[str] = None
-    ) -> None:
+    def _save_mermaid_graph(self, graph: str, output_path: Optional[str] = None) -> None:
         """Convert mermaid graph to PNG and save it in session directory."""
 
         try:
@@ -323,9 +321,7 @@ class Pipeline:
             base64_string = base64_bytes.decode("ascii")
 
             # Get image from mermaid.ink API
-            response = requests.get(
-                f"https://mermaid.ink/img/{base64_string}", timeout=30
-            )
+            response = requests.get(f"https://mermaid.ink/img/{base64_string}", timeout=30)
             response.raise_for_status()
 
             # Save image

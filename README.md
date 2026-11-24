@@ -16,6 +16,8 @@ Official repository for the paper:
 
 ---
 
+[**MetaAgent + Jev judges experiment**](examples/jev/README.md) — architecture, setup, and paired results across Who&When, WebArena, AEGIS, TRAIL, and AgentErrorBench.
+
 ## Overview
 
 Evaluating LLM-based multi-agent systems (MAS) from execution traces is hard: traces are long, failure modes are diverse, and existing judges are hand-built per benchmark. New agent benchmarks now appear faster than custom judges can be built by hand.
@@ -234,6 +236,41 @@ protocol in [`docs/JEV_EXPERIMENT.md`](docs/JEV_EXPERIMENT.md). The runner above
 is the original Who&When-specific implementation. The current design,
 limitations, and comparison criteria are summarized in
 [`docs/JEV_ARCHITECTURE_RU.md`](docs/JEV_ARCHITECTURE_RU.md).
+
+Jev runs at most three judges concurrently per graph level. Temporary network
+errors, rate limits, and selected server failures get up to three attempts per
+judge. Authentication errors and invalid responses are reported immediately.
+The runner records each Jev attempt and retains any available usage receipts.
+A run with unreconciled attempt charges has no complete cost total.
+
+For a controlled run, use the Who&When
+[snapshot pinned in the article's comparison](https://huggingface.co/datasets/Kevin355/Who_and_When/tree/59b9fcba1aaed7bbf206b5f4d3c68b8face2f49c).
+The runner verifies the Parquet file hashes. The pilot selects six Hand
+development traces of varying lengths. The main phase uses all 126 Algo traces
+and also reports the 81 whose questions do not overlap with Hand. Controlled runs
+require six specialists per pool and use a fixed causal-attribution prompt for
+the final judge. They save a manifest with the input hashes, references, arms,
+and model settings before inference.
+
+```bash
+uv run --group benchmarks python examples/who_and_when/run_jev.py Hand-Crafted.parquet \
+    --phase pilot --output /tmp/jev-pilot.jsonl
+uv run --group benchmarks python examples/who_and_when/run_jev.py Algorithm-Generated.parquet \
+    --phase main --hand Hand-Crafted.parquet --output /tmp/jev-main.jsonl
+uv run --group benchmarks python examples/who_and_when/report_jev.py /tmp/jev-main.jsonl \
+    --output /tmp/jev-report
+```
+
+The report writes paired accuracy differences with 95% trace-bootstrap intervals
+and PNGs for accuracy, cost, and latency. Pass `--meta-rates INPUT OUTPUT` and
+`--chat-rates INPUT OUTPUT` to record estimates from observed chat token usage,
+using the verified prices in USD per million tokens for your routes. The report
+command accepts the same flags for pricing recorded tokens without rerunning inference. It
+marks incomplete cost totals as unavailable. Jev fees still appear per node in
+the JSONL. A run interrupted midway remains reportable against its original
+manifest, with missing predictions counted separately and no paired interval
+until all requested arms have a record for every selected trace. Repeat the same
+runner command with `--resume` to skip recorded arms, including failures.
 
 ### Long traces: summary + retrieval mode
 

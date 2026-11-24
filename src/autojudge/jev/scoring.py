@@ -12,6 +12,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from .contracts import EvaluationCase, EvaluationSpec, MetricSpec, ReferenceCase, TargetSpec
+from .engine import candidates_for
 
 
 def _target_for(spec: EvaluationSpec, target_id: str) -> TargetSpec:
@@ -170,6 +171,14 @@ def _project(
         }
         if any(candidate_id not in canonical for candidate_id in selected_ids):
             return False, None, "selected actor ID is not present in the case"
+    elif target.source == "actor_options":
+        canonical = {
+            candidate.id: {field: value for field, value in candidate.selected_data().items()
+                           if field != "id"}
+            for candidate in candidates_for(case, target)
+        }
+        if any(candidate_id not in canonical for candidate_id in selected_ids):
+            return False, None, "selected actor and option pair is not available for the case"
     else:
         canonical = {
             option.id: {"actor": None, "index": None, "source_step": None, "source_id": None}

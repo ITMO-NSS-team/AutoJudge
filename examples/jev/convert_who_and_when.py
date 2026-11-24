@@ -5,10 +5,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
+from autojudge.jev.contracts import EvaluationCase, ReferenceCase
 from autojudge.jev.normalization import (
     normalize_who_and_when_row,
     parse_finite_float,
@@ -54,8 +55,15 @@ def source_rows(path: Path, limit: int | None) -> Iterator[tuple[int, Any, str |
     else:
         raise ValueError("Input must be a .parquet or .jsonl file")
 
-
-def convert(path: Path, output_dir: Path, limit: int | None = None) -> dict[str, int]:
+def convert(
+    path: Path,
+    output_dir: Path,
+    limit: int | None = None,
+    *,
+    normalize_row: Callable[[dict[str, Any]], tuple[EvaluationCase, ReferenceCase]] = normalize_who_and_when_row,
+    converter: str = "who_and_when",
+    id_field: str = "question_ID",
+) -> dict[str, int]:
     if limit is not None and limit <= 0:
         raise ValueError("limit must be positive")
     if path.suffix not in {".parquet", ".jsonl"}:
@@ -80,16 +88,16 @@ def convert(path: Path, output_dir: Path, limit: int | None = None) -> dict[str,
     ):
         for line_number, row, parse_error in source_rows(path, limit):
             case_id = None
-            if isinstance(row, dict) and row.get("question_ID") is not None:
-                case_id = str(row["question_ID"])
+            if isinstance(row, dict) and row.get(id_field) is not None:
+                case_id = str(row[id_field])
             try:
                 if parse_error is not None:
                     raise ValueError(parse_error)
                 if not isinstance(row, dict):
                     raise ValueError("Source row must be an object")
-                case, reference = normalize_who_and_when_row(row)
+                case, reference = normalize_row(row)
                 if case.case_id in seen_ids:
-                    raise ValueError(f"Duplicate question_ID: {case.case_id}")
+                    raise ValueError(f"Duplicate {id_field}: {case.case_id}")
                 case_json = json.dumps(
                     case.model_dump(mode="json"), ensure_ascii=False, allow_nan=False
                 )
@@ -119,7 +127,7 @@ def convert(path: Path, output_dir: Path, limit: int | None = None) -> dict[str,
             os.fsync(target.fileno())
     publish_conversion_manifest(
         output_dir,
-        converter="who_and_when",
+        converter=converter,
         sources=[("input", path)],
         cases=counts["cases"],
         errors=counts["errors"],

@@ -245,6 +245,42 @@ Only provider billing can establish the exact cost after such a crash. The
 runner exits nonzero if any attempt is partial or failed, after writing the
 reports.
 
+## Reusing the AEGIS launcher
+
+The full-trace AEGIS launcher uses the same evidence preparation for chat and
+Jev. Its export mode reads a saved test split and exits before initializing
+providers or running judges:
+
+```bash
+uv run --group benchmarks python examples/aegis/auto_judge_launch_aegis_no_summaries.py \
+  --jev-export test.jsonl --output-dir /tmp/jev-aegis-input
+```
+
+The export keeps the task and conversation, omits injection flags, and writes
+the annotated actor/error pairs to `references.jsonl`. To evaluate the
+adaptive graph, pass those case and reference files to `run_experiment.py`
+with `--spec examples/jev/specs/aegis.json --primary-metric actor_error_f1
+--modes adaptive direct --specialist-count 6`. The primary metric is mean
+per-trace set F1 over actor/error pairs.
+
+## Preparing TRAIL and AgentErrorBench
+
+Run these converters from the repository root with the authors' local source exports:
+
+```bash
+uv run --group benchmarks python -m examples.jev.convert_trail \
+  /path/to/trail-benchmark/benchmarking --output-dir /tmp/jev-trail-input
+uv run --group benchmarks python -m examples.jev.convert_agent_error \
+  /path/to/AgentErrorBench --output-dir /tmp/jev-agent-error-input
+```
+
+Use `examples/jev/specs/trail.json` with primary metric `span_f1`.
+This spec measures span localization. The converter reuses the trace cleaner,
+preserves span IDs, and bounds long evidence fields. For AgentErrorBench use
+`examples/jev/specs/agent_error_bench.json` with `step_accuracy`. The converter
+groups messages by agent turn and keeps the annotated step and module in the
+reference file. Preflight checks both labels against the available candidates.
+
 ## Reading the summary
 
 Exact accuracy counts a missing or invalid target answer as zero. Binary F1

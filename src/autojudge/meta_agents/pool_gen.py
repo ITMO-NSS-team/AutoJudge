@@ -23,6 +23,7 @@ class AgentSchema(BaseModel):
     model: str = os.getenv("AGENT_NODE_MODEL", "google/gemini-2.5-flash")
     use_tools: bool = True  # added from new version
 
+
 class PoolGenerator(BaseMetaAgent):
     def __init__(
         self,
@@ -32,13 +33,18 @@ class PoolGenerator(BaseMetaAgent):
         taxonomy: str = "",
         examples: str = "",
         use_summary: bool = False,
+        specialist_count: int | None = None,
     ):
         configured_temperature = os.getenv("POOL_GEN_TEMPERATURE")
         if configured_temperature is not None and float(configured_temperature) != temperature:
-            print('ATTENTION: Found another PoolGenerator temperature in config file: ', os.getenv("POOL_GEN_TEMPERATURE"))
+            print(
+                "ATTENTION: Found another PoolGenerator temperature in config file: ",
+                os.getenv("POOL_GEN_TEMPERATURE"),
+            )
         print(
             f"Initializing PoolGenerator with model={model}, temperature={temperature}, summary: {use_summary}"
         )
+        self.specialist_count = specialist_count
         self.summary = use_summary
         self.use_tools = use_summary  # derived: summary mode implies tool-enabled prompt
         self.schema = output_schema
@@ -51,17 +57,24 @@ class PoolGenerator(BaseMetaAgent):
 
     def _get_system_prompt(self) -> str:
         if not self.summary:
-            return DEFAULT_POOL_INSTRUCT_EXTENDED_no_db_tool.substitute(
+            prompt = DEFAULT_POOL_INSTRUCT_EXTENDED_no_db_tool.substitute(
                 taxonomy=self.taxonomy,
                 judge_output_format=self.schema,
                 examples=self.examples,
             )
         else:
-            return DEFAULT_POOL_INSTRUCT_EXTENDED.substitute(
+            prompt = DEFAULT_POOL_INSTRUCT_EXTENDED.substitute(
                 taxonomy=self.taxonomy,
                 judge_output_format=self.schema,
                 examples=self.examples,
             )
+
+        if self.specialist_count is not None:
+            prompt += (
+                f"\nReturn exactly {self.specialist_count} intermediate judges plus one "
+                "FINAL_AGGREGATOR. This exact count overrides the earlier recommendation."
+            )
+        return prompt
 
     def _get_output_type(self):
         return list[AgentSchema]
@@ -69,23 +82,19 @@ class PoolGenerator(BaseMetaAgent):
     def _create_agents(self, agent_schemas: List[AgentSchema]) -> List[AgentNode]:
         if not agent_schemas:
             raise ValueError("No valid agents generated")
-        logger.info(
-            f"Creating {len(agent_schemas)} agents: {[s.name for s in agent_schemas]}"
-        )
+        logger.info(f"Creating {len(agent_schemas)} agents: {[s.name for s in agent_schemas]}")
         return [
             AgentNode(
                 name=schema.name,
                 instructions=schema.instructions,
                 model=schema.model,
                 mcp_tools=[schema.mcp_tools],  # kept original wrapping
-                use_tools=self.use_tools,       # added from new version
+                use_tools=self.use_tools,  # added from new version
             )
             for schema in agent_schemas
         ]
 
-    async def create_pool(
-        self, task_description: str, context: Optional[str] = None
-    ) -> AgentPool:
+    async def create_pool(self, task_description: str, context: Optional[str] = None) -> AgentPool:
         user_prompt = f"TASK: {task_description}"
         if context:
             user_prompt += f"\n\nPREVIOUS ATTEMPT FEEDBACK:\n{context}"

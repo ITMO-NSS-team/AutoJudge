@@ -59,7 +59,7 @@ class TargetSpec(_StrictModel):
 
     id: str = Field(min_length=1)
     question: str = Field(min_length=1)
-    source: Literal["events", "actors", "options"]
+    source: Literal["events", "actors", "options", "actor_options"]
     cardinality: Literal["one", "many"] = "one"
     options: list[Option] = Field(default_factory=list)
     allow_none: bool = False
@@ -70,9 +70,9 @@ class TargetSpec(_StrictModel):
         option_ids = [option.id for option in self.options]
         if len(option_ids) != len(set(option_ids)):
             raise ValueError(f"Target {self.id} has duplicate option ids")
-        if self.source == "options" and not self.options:
-            raise ValueError(f"Target {self.id} requires static options")
-        if self.source != "options" and self.options:
+        if self.source in {"options", "actor_options"} and not self.options:
+            raise ValueError(f"Target {self.id} requires options")
+        if self.source not in {"options", "actor_options"} and self.options:
             raise ValueError(f"Target {self.id} derives options from {self.source}")
         if self.allow_none and NONE_OPTION_ID in option_ids:
             raise ValueError(f"Target {self.id} reserves option id {NONE_OPTION_ID}")

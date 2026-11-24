@@ -7,6 +7,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
+if __name__ == "__main__" and sys.argv[1:2] == ["--jev-export"]:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from examples.jev.convert_aegis import main as export_jev
+
+    export_jev(sys.argv[2:])
+    sys.exit()
+
 from dotenv import load_dotenv
 
 load_dotenv(".env")
@@ -15,6 +22,7 @@ from datasets import load_dataset
 from maseval import get_langfuse_judge_client
 
 from autojudge.agent_pool import AgentPool
+from autojudge.jev.normalization import aegis_judge_input
 from autojudge.db.db_tools import get_content_tool
 from autojudge.meta_agents import PoolGenerator
 from autojudge.meta_agents.graph_gen import get_parallel_graph
@@ -348,12 +356,7 @@ async def main(save_folder: str, split: str = "test", max_traces: int | None = N
             logger.info(f"Task {trace_id} previously failed, skipping...")
             continue
 
-        trace_input = trace.get("input", {})
-        question = trace_input.get("query", "")
-
-        # Use full raw conversation from trace input
-        trace_input = trace.get("input", {})
-        conversation_history = trace_input.get("conversation_history", [])
+        question, conversation_history = aegis_judge_input(trace)
         if not conversation_history:
             logger.warning(
                 f"No conversation_history found for {trace_id}, skipping trace"

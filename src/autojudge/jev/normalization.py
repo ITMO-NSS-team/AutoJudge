@@ -298,3 +298,14 @@ def normalize_who_and_when_row(row: Mapping[str, Any]) -> tuple[EvaluationCase, 
         labels={"agent": reference_agent, "step": source_step + 1},
     )
     return case, reference
+
+
+def aegis_judge_input(row: Mapping[str, Any]) -> tuple[str, list[dict[str, Any]]]:
+    """Share the evidence view between the AEGIS chat and decision judges."""
+    source = row.get("input") or {}
+    history = [
+        {key: message[key] for key in ("step", "agent_name", "phase", "agent_role", "content")
+         if key in message}
+        for message in source.get("conversation_history") or []
+    ]
+    return source.get("query", ""), history

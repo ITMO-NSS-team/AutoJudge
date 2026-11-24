@@ -48,13 +48,14 @@ from autojudge.model_connection import (
     omniroute_base_url,
 )
 
-MODES = ("direct", "fixed", "adaptive")
+MODES = ("direct", "fixed", "adaptive", "reviewed", "evidence")
 MODE_ORDER_POLICY = "cyclic_by_case_v1"
 SOURCE_FILES = (
     "pyproject.toml",
     "examples/jev/run_experiment.py",
     "examples/jev/build_who_and_when_holdout.py",
     "examples/jev/convert_who_and_when.py",
+    "examples/jev/convert_aegis.py",
     "examples/jev/convert_webarena.py",
     "src/autojudge/jev/client.py",
     "src/autojudge/jev/contracts.py",
@@ -350,6 +351,10 @@ def _preflight(
         raise ValueError("At least one mode is required")
     if len(set(modes)) != len(modes):
         raise ValueError("Modes must be unique")
+    if "evidence" in modes and not any(
+        target.source == "events" and target.cardinality == "one" for target in spec.targets
+    ):
+        raise ValueError("Evidence mode needs a single-choice event target")
     if "fixed" in modes and args.fixed_plan is None:
         raise ValueError("Fixed mode requires --fixed-plan")
     if args.fixed_plan is not None and "fixed" not in modes:
@@ -817,7 +822,10 @@ async def _run_one(
     if mode != "adaptive" or plan is not None:
         judging_started = perf_counter()
         try:
-            result = await evaluator.evaluate(case, spec, plan)
+            if mode in ("reviewed", "evidence"):
+                result = await evaluator.evaluate(case, spec, review=mode)
+            else:
+                result = await evaluator.evaluate(case, spec, plan)
         except Exception as exc:  # The ledger still gets a failed paired attempt.
             result = _error_result(
                 case.case_id,

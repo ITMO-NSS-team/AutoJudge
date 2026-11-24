@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
+from time import perf_counter
 from typing import Any, Literal
 
 import httpx
@@ -15,6 +17,10 @@ from .node import AgentNode
 from .types import CostBreakdown
 
 JEV_MODEL = "typesafe/jev-1.14"
+DECISION_MAX_ATTEMPTS = 3
+DECISION_CONCURRENCY = 3
+RETRYABLE_STATUS = {408, 429, 500, 502, 503, 504, 524, 529}
+RETRYABLE_TRANSPORT = (httpx.NetworkError, httpx.TimeoutException, httpx.RemoteProtocolError)
 FINAL_AGGREGATOR = "FINAL_AGGREGATOR"
 FINAL_QUESTION = (
     "Select the first message containing the decisive mistake that caused the failed attempt. "
@@ -71,6 +77,37 @@ class DecisionNode(AgentNode):
     use_tools: bool = field(default=False, init=False)
     final: bool = field(default=False, kw_only=True)
     decision_cost: float = field(default=0.0, init=False)
+    attempts: list[dict[str, Any]] = field(default_factory=list, init=False)
+
+    async def _request(
+        self, client: httpx.AsyncClient, endpoint: str, api_key: str, payload: dict
+    ) -> httpx.Response:
+        for number in range(1, DECISION_MAX_ATTEMPTS + 1):
+            started = perf_counter()
+            attempt: dict[str, Any] = {"attempt": number}
+            self.attempts.append(attempt)
+            delay = None
+            try:
+                response = await client.post(
+                    endpoint, json=payload, headers={"Authorization": f"Bearer {api_key}"}
+                )
+                attempt["status_code"] = response.status_code
+                response.raise_for_status()
+                return response
+            except (httpx.HTTPStatusError, *RETRYABLE_TRANSPORT) as exc:
+                attempt["error"] = type(exc).__name__
+                if isinstance(exc, httpx.HTTPStatusError):
+                    if exc.response.status_code not in RETRYABLE_STATUS:
+                        raise
+                    retry_after = exc.response.headers.get("Retry-After", "")
+                    if retry_after.isascii() and retry_after.isdecimal() and len(retry_after) < 5:
+                        delay = int(retry_after)
+                if number == DECISION_MAX_ATTEMPTS or (delay is not None and delay > 30):
+                    raise
+            finally:
+                attempt["elapsed_seconds"] = perf_counter() - started
+            await asyncio.sleep(max(delay or 0, 2 ** (number - 1)))
+        raise AssertionError("Decision retry loop exhausted")
 
     @property
     def cost(self) -> CostBreakdown:
@@ -81,6 +118,9 @@ class DecisionNode(AgentNode):
     async def decide(
         self, client: httpx.AsyncClient, trace: DecisionTrace, findings: list[dict]
     ) -> tuple[dict, DecisionResponse]:
+        self.attempts.clear()
+        self.decision_cost = 0.0
+        self._usage = None
         endpoint, api_key = decision_connection()
         candidates = trace.candidates()
         criteria = {
@@ -106,20 +146,23 @@ class DecisionNode(AgentNode):
                 "criteria": {"true": "It is the decisive error.", "false": "It is not."},
             }
 
-        response = await client.post(
+        response = await self._request(
+            client,
             endpoint,
-            json={
+            api_key,
+            {
                 "model": self.model,
                 "state": {"trace": trace.model_dump(mode="json"), "prior_judgments": findings},
                 "questions": {"attribution": question},
             },
-            headers={"Authorization": f"Bearer {api_key}"},
         )
-        response.raise_for_status()
         decision = DecisionResponse.model_validate(response.json())
+        self.attempts[-1]["usage"] = decision.usage.model_dump()
         self.decision_cost = decision.usage.cost
         self._usage = RunUsage(
-            input_tokens=decision.usage.input_tokens, output_tokens=decision.usage.output_tokens
+            requests=len(self.attempts),
+            input_tokens=decision.usage.input_tokens,
+            output_tokens=decision.usage.output_tokens,
         )
         if not (decision.model == self.model or decision.model.startswith(self.model + "-")):
             raise ValueError("Unexpected model in Jev response")

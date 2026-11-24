@@ -211,3 +211,133 @@ def test_explicit_openrouter_decisions_with_omniroute_chat(monkeypatch):
     monkeypatch.setenv("OPENROUTER_DECISIONS_URL", "https://gateway.example/decisions")
     with pytest.raises(ValueError, match="official OpenRouter endpoint"):
         decision_connection()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("sequence", "expected_delays", "ok"),
+    [
+        (["read", 429, 200], [1, 3], True),
+        ([401], [], False),
+        ([503, 503, 503], [1, 2], False),
+    ],
+)
+async def test_jev_retry_policy_records_requests(monkeypatch, sequence, expected_delays, ok):
+    from autojudge.pipeline import decisions
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    delays = []
+
+    async def sleep(delay):
+        delays.append(delay)
+
+    monkeypatch.setattr(decisions.asyncio, "sleep", sleep)
+    pool = direct_decision_pool()
+    pipeline = PipelineBuilder().create_from_pool(pool, get_parallel_graph(pool)).build()
+    bodies = []
+
+    def respond(request):
+        outcome = sequence[len(bodies)]
+        bodies.append(request.content)
+        if outcome == "read":
+            raise httpx.ReadError("temporary network failure", request=request)
+        if outcome != 200:
+            return httpx.Response(outcome, headers={"Retry-After": "3"} if outcome == 429 else {})
+        return httpx.Response(
+            200,
+            json={
+                "model": JEV_MODEL,
+                "answers": {
+                    "attribution": {
+                        "type": "choice",
+                        "choice": "step_2",
+                        "probabilities": {"step_1": 0.1, "step_2": 0.9},
+                    }
+                },
+                "usage": {"input_tokens": 100, "output_tokens": 5, "cost": 0.0001},
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        if ok:
+            result = await pipeline.ainvoke(TRACE.model_dump(), decision_client=client)
+            assert result["step"] == 2
+        else:
+            with pytest.raises(RuntimeError, match="HTTPStatusError"):
+                await pipeline.ainvoke(TRACE.model_dump(), decision_client=client)
+    assert delays == expected_delays
+    assert len(bodies) == len(sequence)
+    assert len(set(bodies)) == 1
+    attempts = pipeline.execution_order[0].attempts
+    assert len(attempts) == len(sequence)
+    assert sum("usage" in attempt for attempt in attempts) == int(ok)
+    if ok:
+        assert attempts[0]["error"] == "ReadError"
+        assert attempts[1]["status_code"] == 429
+        assert pipeline.trace.node_traces[0].usage.requests == 3
+
+
+@pytest.mark.asyncio
+async def test_jev_caps_concurrent_specialists_and_passes_all_findings(monkeypatch):
+    import asyncio
+
+    from autojudge.agent_pool import AgentPool
+    from autojudge.pipeline.decisions import DECISION_CONCURRENCY, FINAL_AGGREGATOR, DecisionNode
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    specialist_count = DECISION_CONCURRENCY + 2
+    pool = AgentPool(
+        [
+            *[
+                DecisionNode(name=f"SPECIALIST_{i}", instructions="Find a mistake.")
+                for i in range(specialist_count)
+            ],
+            DecisionNode(name=FINAL_AGGREGATOR, instructions="Find the root cause.", final=True),
+        ]
+    )
+    pipeline = PipelineBuilder().create_from_pool(pool, get_parallel_graph(pool)).build()
+    first_wave = asyncio.Event()
+    release = asyncio.Event()
+    active = peak = 0
+
+    async def respond(request):
+        nonlocal active, peak
+        body = json.loads(request.content)
+        findings = body["state"]["prior_judgments"]
+        criteria = body["questions"]["attribution"]["criteria"]
+        if findings:
+            assert len(findings) == specialist_count
+        else:
+            active += 1
+            peak = max(peak, active)
+            if active == DECISION_CONCURRENCY:
+                first_wave.set()
+            try:
+                await release.wait()
+            finally:
+                active -= 1
+        return httpx.Response(
+            200,
+            json={
+                "model": JEV_MODEL,
+                "answers": {
+                    "attribution": {
+                        "type": "choice",
+                        "choice": "step_2",
+                        "probabilities": {option: float(option == "step_2") for option in criteria},
+                    }
+                },
+                "usage": {"input_tokens": 100, "output_tokens": 5, "cost": 0.0001},
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        running = asyncio.create_task(pipeline.ainvoke(TRACE.model_dump(), decision_client=client))
+        try:
+            await asyncio.wait_for(first_wave.wait(), timeout=5)
+            assert peak == DECISION_CONCURRENCY
+        finally:
+            release.set()
+            result = await running
+    assert result["step"] == 2
+    assert peak == DECISION_CONCURRENCY

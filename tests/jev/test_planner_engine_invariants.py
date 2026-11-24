@@ -131,6 +131,89 @@ async def test_specialist_can_abstain_but_mandatory_final_cannot(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("review_choice", "expected"), [("c_3", "event_3"), ("none", "event_1"), ("error", "event_1")])
+async def test_review_uses_shortlist_and_keeps_first_verdict_on_failure(
+    monkeypatch: pytest.MonkeyPatch, review_choice: str, expected: str
+) -> None:
+    monkeypatch.setattr(
+        "autojudge.jev.client.decision_connection",
+        lambda: ("https://example.test/api/alpha/decisions", "test-key"),
+    )
+    case, spec = _mandatory_event_target()
+    case.events.extend(
+        EvidenceEvent(id=f"event_{index}", index=index, actor="Alice", content=f"Evidence {index}")
+        for index in (3, 4)
+    )
+    seen = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        question = payload["questions"]["q"]
+        seen.append(set(question["criteria"]))
+        assert len(payload["state"]["events"]) == 4
+        assert payload["state"]["prior_judgments"] == []
+        if len(seen) == 1:
+            choice = "c_1"
+            probabilities = {"c_1": 0.45, "c_2": 0.14, "c_3": 0.40, "c_4": 0.01}
+        else:
+            if review_choice == "error":
+                return httpx.Response(503)
+            choice = review_choice
+            probabilities = {key: float(key == choice) for key in question["criteria"]}
+        return httpx.Response(
+            200,
+            json={"model": JEV_MODEL, "answers": {"q": {
+                "type": "choice", "choice": choice, "probabilities": probabilities,
+            }}},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as transport:
+        result = await JevEvaluator(transport, max_attempts=1).evaluate(case, spec, review="reviewed")
+
+    assert seen == [{"c_1", "c_2", "c_3", "c_4"}, {"c_1", "c_2", "c_3", "none"}]
+    assert result["answers"]["origin_message"]["selected_ids"] == [expected]
+    assert result["calls"][-1]["stage"] == "final:origin_message:review"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("challenger_score", "expected"), [(0.75, "event_2"), (0.54, "event_1")])
+async def test_evidence_requires_a_supported_challenger(
+    monkeypatch: pytest.MonkeyPatch, challenger_score: float, expected: str
+) -> None:
+    monkeypatch.setattr(
+        "autojudge.jev.client.decision_connection",
+        lambda: ("https://example.test/api/alpha/decisions", "test-key"),
+    )
+    case, spec = _mandatory_event_target()
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        questions = payload["questions"]
+        if "q" in questions:
+            answers = {"q": {
+                "type": "choice", "choice": "c_1", "probabilities": {"c_1": 0.6, "c_2": 0.4},
+            }}
+        else:
+            assert set(questions) == {"c_1", "c_2"}
+            assert len(payload["state"]["events"]) == 2
+            answers = {
+                key: {
+                    "type": "choice",
+                    "choice": "origin" if score >= 0.5 else "downstream",
+                    "probabilities": {"origin": score, "downstream": 1 - score, "other": 0.0},
+                }
+                for key, score in {"c_1": 0.42, "c_2": challenger_score}.items()
+            }
+        return httpx.Response(200, json={"model": JEV_MODEL, "answers": answers})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as transport:
+        result = await JevEvaluator(transport, max_attempts=1).evaluate(case, spec, review="evidence")
+
+    assert result["answers"]["origin_message"]["selected_ids"] == [expected]
+    assert result["calls"][-1]["stage"] == "final:origin_message:evidence"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("returned_count", [2, 4])
 async def test_meta_plan_rejects_wrong_exact_specialist_count(
     monkeypatch: pytest.MonkeyPatch, returned_count: int
