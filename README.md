@@ -228,6 +228,13 @@ set `OPENROUTER_DECISIONS_URL=https://openrouter.ai/api/alpha/decisions` and a s
 `OPENROUTER_API_KEY`. Set only one Decisions URL. The Jev modes fail before
 inference if neither route is configured for an OmniRoute setup.
 
+For benchmark-neutral Jev runs, use the normalized case/reference format,
+versioned rubric, paired `direct`/`fixed`/`adaptive` runner, and experiment
+protocol in [`docs/JEV_EXPERIMENT.md`](docs/JEV_EXPERIMENT.md). The runner above
+is the original Who&When-specific implementation. The current design,
+limitations, and comparison criteria are summarized in
+[`docs/JEV_ARCHITECTURE_RU.md`](docs/JEV_ARCHITECTURE_RU.md).
+
 ### Long traces: summary + retrieval mode
 
 For traces that don't fit a context window:
