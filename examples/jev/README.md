@@ -1,45 +1,49 @@
-# AutoJudge with MetaAgent and Jev judges
+# AutoJudge с MetaAgent и Jev-судьями
 
-This experiment tests whether a trace-specific panel of Jev judges improves on direct Jev and how replacing the LLM judges changes AutoJudge. A generative MetaAgent reads each trace and the benchmark rubric, then writes six specialist questions. Jev 1.14 executes the specialists in parallel. The final Jev judge for each evaluation target sees the trace and the specialists' findings and produces a typed verdict.
+Эксперимент проверяет, помогает ли адаптивный пул Jev-судей по сравнению с прямым Jev и что меняется при замене LLM-судей на Jev внутри AutoJudge. MetaAgent остаётся генеративной LLM. Он читает трассу и правила бенчмарка и формулирует шесть вопросов для специалистов. Jev 1.14 параллельно выполняет эти проверки. Затем финальный Jev получает трассу и выводы специалистов и выносит структурированный вердикт по каждой цели оценки.
 
 ```text
-Benchmark trace + evaluation spec
-  → Gemini 2.5 Flash MetaAgent
-  → six Jev 1.14 specialists
-  → Jev 1.14 final verdict per target
-  → scorer compares the verdict with the separate reference
+Трасса бенчмарка + спецификация оценки
+  → MetaAgent на Gemini 2.5 Flash
+  → шесть специалистов на Jev 1.14
+  → финальный вердикт Jev 1.14 по каждой цели
+  → сравнение вердикта с эталонной разметкой
 ```
 
-Python builds the allowed answers from the trace and the evaluation spec. For example, Who&When chooses one message and projects it to both the agent and the step. AEGIS checks pairs of trace actors and error categories. MetaAgent and the judges receive the evidence and rubric. The reference labels enter at scoring.
+Python строит допустимые варианты ответа из трассы и спецификации. В Who&When судья выбирает сообщение, а код извлекает его автора и номер шага. В AEGIS судья проверяет пары «агент + тип ошибки». MetaAgent и судьи получают трассу и правила оценки. Эталонная разметка используется для проверки входных данных и подсчёта метрик.
 
-## Cross-benchmark results
+## Результаты по бенчмаркам
 
-We ran the adaptive graph and direct Jev on the same 1,198 traces from five benchmarks. Direct Jev applies the same final target questions to the trace with an empty specialist context. Both arms used Jev `typesafe/jev-1.14-20261014`. The graph used Gemini 2.5 Flash through OmniRoute for per-trace planning.
+Сравнили адаптивный граф и прямой Jev на одних и тех же **1 198 трассах из пяти бенчмарков**. У прямого Jev те же цели оценки, а список выводов специалистов пуст. В обоих режимах использовали `typesafe/jev-1.14-20261014`. Для генерации плана по каждой трассе использовали Gemini 2.5 Flash через OmniRoute.
 
-| Benchmark | Traces | Primary metric | MetaAgent + Jev | Direct Jev | Paired difference, pp [95% CI] | Median time, graph / direct |
+| Бенчмарк | Трасс | Основная метрика | MetaAgent + Jev | Прямой Jev | Парная разница, п.п. [95% ДИ] | Медиана времени, граф / прямой |
 | --- | ---: | --- | ---: | ---: | --- | ---: |
-| TRAIL | 148 | Span localization F1 | **30.24%** | 26.25% | **+3.99 [+0.66, +7.39]** | 9.25 / 0.61 s |
-| WebArena | 78 | Success F1 | **90.57%** | 83.64% | +6.93 [−1.44, +16.84] | 3.74 / 0.28 s |
-| AEGIS | 600 | Actor–error pair F1 | 12.41% | 12.75% | −0.34 [−1.04, +0.38] | 8.16 / 1.25 s |
-| AgentErrorBench | 199 | Exact step | 19.10% | 20.10% | −1.01 [−4.52, +2.51] | 6.65 / 0.47 s |
-| Who&When Algo | 123 | Exact step | 44.72% | 47.15% | −2.44 [−8.94, +4.07] | 3.57 / 0.25 s |
-| Who&When Hand | 50 | Exact step | 12.00% | 20.00% | −8.00 [−16.00, −2.00] | 5.28 / 0.40 s |
+| TRAIL | 148 | F1 локализации ошибки по спанам | **30,24%** | 26,25% | **+3,99 [+0,66; +7,39]** | 9,25 / 0,61 с |
+| WebArena | 78 | F1 определения успеха | **90,57%** | 83,64% | +6,93 [−1,44; +16,84] | 3,74 / 0,28 с |
+| AEGIS | 600 | F1 пары «агент + тип ошибки» | 12,41% | 12,75% | −0,34 [−1,04; +0,38] | 8,16 / 1,25 с |
+| AgentErrorBench | 199 | Точный шаг ошибки | 19,10% | 20,10% | −1,01 [−4,52; +2,51] | 6,65 / 0,47 с |
+| Who&When Algo | 123 | Точный шаг ошибки | 44,72% | 47,15% | −2,44 [−8,94; +4,07] | 3,57 / 0,25 с |
+| Who&When Hand | 50 | Точный шаг ошибки | 12,00% | 20,00% | −8,00 [−16,00; −2,00] | 5,28 / 0,40 с |
 
-The graph found more correct error spans on TRAIL, 1.03 per trace versus 0.77. On WebArena it produced one false successful verdict versus four for direct Jev. The graph was slower on every cohort. The intervals come from 10,000 paired trace resamples of one run and have no multiple-comparison correction. Three non-OK graph results and one direct result stay in the denominators. Jev receipts totaled $12.18 for the graph and $1.89 for direct Jev. This excludes the MetaAgent charges and unpriced attempts.
+На TRAIL граф находил в среднем 1,03 правильно локализованного спана на трассу против 0,77 у прямого Jev. На WebArena граф ошибочно объявил успешной одну трассу, прямой Jev — четыре. Медианное время графа было выше на каждой выборке. Доверительные интервалы получены парным бутстрэпом по трассам одного прогона с 10 000 повторов и без поправки на множественные сравнения. При подсчёте качества учтены три неполных или ошибочных результата графа и один результат прямого Jev.
 
-![Paired differences against direct Jev](results/adaptive-2026-11-25/quality-deltas.svg)
+Известная стоимость вызовов Jev по данным API составила $12,18 для графа и $1,89 для прямого Jev. Расходы MetaAgent и стоимость попыток без подтверждённой цены в эти суммы не входят.
 
-See the [machine-readable summary](results/adaptive-2026-11-25/metrics.json), [case selection lists](results/adaptive-2026-11-25/), and [data provenance](results/adaptive-2026-11-25/PROVENANCE.md).
+![Парные разницы относительно прямого Jev](results/adaptive-2026-11-25/quality-deltas.svg)
 
-### Separate comparison with the LLM graph
+[Метрики в JSON](results/adaptive-2026-11-25/metrics.json) · [Списки трасс](results/adaptive-2026-11-25/) · [Источники данных и отбор](results/adaptive-2026-11-25/PROVENANCE.md)
 
-The original [Who&When runner](../who_and_when/run_jev.py) also compared **AutoJudge with LLM judges** against **AutoJudge with Jev judges**, both with a generative MetaAgent and six specialists. On all 126 Algo traces the Jev graph returned 56 exact steps (44.44%) versus 54 (42.86%) for the LLM graph. The paired difference was +1.59 pp, 95% CI [−7.14, +10.32]. Median latency was 4.84 s versus 20.56 s. Mean cost on 122 jointly priced traces was $0.00399 versus $0.02014 per trace, using nominal token-rate estimates for chat. Each graph generated its own plan. The comparison therefore includes changes to the judge model and its question and answer formats.
+### Сравнение с AutoJudge на LLM-судьях
 
-## Run the adaptive graph
+В отдельном прогоне через [исходный раннер Who&When](../who_and_when/run_jev.py) сравнили **AutoJudge с LLM-судьями** и **AutoJudge с Jev-судьями**. В обоих графах генеративный MetaAgent создавал по шесть специалистов. На всех 126 трассах Algo граф с Jev определил точный шаг в 56 случаях (44,44%), а граф с LLM — в 54 (42,86%). Парная разница составила +1,59 п.п. с 95% ДИ [−7,14; +10,32]. Медианное время составило 4,84 с с Jev и 20,56 с с LLM. Средняя стоимость на 122 трассах с полными данными о расходах составила $0,00399 и $0,02014 соответственно, при этом стоимость чат-вызовов оценена по числу токенов и тарифам.
 
-From the repository root, install the benchmark dependencies with `uv sync --group benchmarks` and configure the endpoints using [`.env.template`](../../.env.template). The reported runs used `OMNIROUTE_BASE_URL` and `OMNIROUTE_API_KEY` for MetaAgent chat and `OPENROUTER_DECISIONS_URL` and `OPENROUTER_API_KEY` for Jev. Use the model identifier understood by your chat endpoint.
+Каждый граф генерировал свой план. Измеренный эффект включает замену модели судей и изменения в формате их вопросов и ответов.
 
-For example, export an AEGIS test JSONL and run a two-trace smoke test:
+## Как запустить адаптивный граф
+
+Из корня репозитория установи зависимости командой `uv sync --group benchmarks` и настрой подключения по [`.env.template`](../../.env.template). В отчётном прогоне для MetaAgent использовали `OMNIROUTE_BASE_URL` и `OMNIROUTE_API_KEY`, а для Jev — `OPENROUTER_DECISIONS_URL` и `OPENROUTER_API_KEY`. В `--meta-model` укажи идентификатор модели, который поддерживает твой шлюз.
+
+Для проверки выгрузи тестовый сплит AEGIS из JSONL и прогони две трассы:
 
 ```bash
 uv run --group benchmarks python examples/aegis/auto_judge_launch_aegis_no_summaries.py \
@@ -55,24 +59,24 @@ uv run --group benchmarks python examples/jev/run_experiment.py \
   --limit 2 --output-dir /tmp/jev-aegis-smoke
 ```
 
-Remove `--limit 2` for a full run and choose a fresh output directory. Pass `--validate-only` to check a dataset and spec before opening a model connection. The runner writes a manifest, one result per case and mode, and a summary. Repeat the same command with `--resume` to continue an interrupted run.
+Для полного прогона убери `--limit 2` и укажи новый каталог результатов. Флаг `--validate-only` позволяет проверить данные и спецификацию без вызовов моделей. Раннер сохраняет настройки в `manifest.json`, результаты по каждой трассе и режиму в `results.jsonl`, сводку в `summary.json`. Чтобы продолжить прерванный прогон, повтори команду с `--resume`.
 
-| Benchmark | Input preparation | Spec |
+| Бенчмарк | Подготовка входа | Спецификация |
 | --- | --- | --- |
-| Who&When | [Parquet or JSONL converter](convert_who_and_when.py). For the reported cohorts, filter original rows to the published IDs before converting. | [who_and_when.json](specs/who_and_when.json) |
-| WebArena | [Download and clean](../agent-reward-bench/prepare_webarena_data.py), then [convert the selected cleaned JSON traces and annotations CSV](convert_webarena.py). | [webarena.json](specs/webarena.json) |
-| AEGIS | [Existing launcher in export mode](../aegis/auto_judge_launch_aegis_no_summaries.py). | [aegis.json](specs/aegis.json) |
-| TRAIL | [Convert the official trace and annotation directories](convert_trail.py). Long span fields are compacted in both modes. | [trail.json](specs/trail.json) |
-| AgentErrorBench | [Join trace JSON and labels by trajectory ID](convert_agent_error.py). Long messages are compacted in both modes. | [agent_error_bench.json](specs/agent_error_bench.json) |
-| Pumpkin | The spec exists. A matched set of execution traces and independent human labels was unavailable for this run. | [pumpkin.json](specs/pumpkin.json) |
+| Who&When | [Конвертер Parquet или JSONL](convert_who_and_when.py). Чтобы повторить отчётный прогон, перед конвертацией отфильтруй исходные строки по опубликованным идентификаторам. | [who_and_when.json](specs/who_and_when.json) |
+| WebArena | [Загрузка и очистка](../agent-reward-bench/prepare_webarena_data.py), затем [конвертация выбранных JSON-трасс и CSV-разметки](convert_webarena.py). | [webarena.json](specs/webarena.json) |
+| AEGIS | [Существующий скрипт запуска в режиме экспорта](../aegis/auto_judge_launch_aegis_no_summaries.py). | [aegis.json](specs/aegis.json) |
+| TRAIL | [Конвертация официальных трасс и аннотаций](convert_trail.py). Длинные поля спанов сокращаются одинаково для обоих режимов. | [trail.json](specs/trail.json) |
+| AgentErrorBench | [Связывание JSON-трасс с разметкой по идентификатору](convert_agent_error.py). Длинные сообщения сокращаются одинаково для обоих режимов. | [agent_error_bench.json](specs/agent_error_bench.json) |
+| Pumpkin | Для прогона нужен комплект трасс с независимой человеческой разметкой. В этом эксперименте такого комплекта не было. | [pumpkin.json](specs/pumpkin.json) |
 
-The paired results use all 600 AEGIS and 148 TRAIL cases, one eligible singly annotated trace for each of 78 official WebArena test tasks, 199/200 AgentErrorBench traces, and 173/184 Who&When traces. Who&When exclusions have unreachable agent–step references. The one AgentErrorBench exclusion has an annotated step beyond the trace. TRAIL measures span localization; two annotations without span IDs are omitted.
+В таблицу вошли все 600 трасс AEGIS и 148 TRAIL, по одной трассе с однозначной разметкой для 78 официальных тестовых задач WebArena, 199/200 трасс AgentErrorBench и 173/184 трассы Who&When. Из Who&When исключены строки, где эталонная пара «агент + шаг» не соответствует ни одному сообщению. В AgentErrorBench исключена трасса с эталонным шагом за пределами истории. В TRAIL измеряется локализация по спанам. Две аннотации без идентификатора спана исключены из расчёта.
 
-## Code map
+## Где смотреть код
 
-- [Experiment runner](run_experiment.py) handles case selection, modes, resume, and per-case logging.
-- [MetaAgent planner](../../src/autojudge/jev/planner.py) generates and validates the specialist plan.
-- [Jev evaluator](../../src/autojudge/jev/engine.py) executes the two levels of the graph and assembles typed answers.
-- [Decisions client](../../src/autojudge/jev/client.py) submits requests and records retries and usage.
-- [Scorer](../../src/autojudge/jev/scoring.py) projects the verdict into benchmark labels and computes metrics.
-- [Protocol](../../docs/JEV_EXPERIMENT.md) describes the input contract, commands for other benchmarks, and reporting details.
+- [Раннер эксперимента](run_experiment.py) выбирает трассы и режимы, поддерживает возобновление и ведёт журнал результатов.
+- [Планировщик MetaAgent](../../src/autojudge/jev/planner.py) генерирует и проверяет план специалистов.
+- [Движок Jev](../../src/autojudge/jev/engine.py) исполняет два уровня графа и собирает структурированные ответы.
+- [Клиент Decisions API](../../src/autojudge/jev/client.py) отправляет запросы, повторяет временно неудачные попытки и сохраняет данные об использовании.
+- [Подсчёт метрик](../../src/autojudge/jev/scoring.py) извлекает значения из вердикта и сравнивает их с разметкой.
+- [Протокол](../../docs/JEV_EXPERIMENT.md) описывает форматы входа, команды для других бенчмарков и расчёт метрик.
